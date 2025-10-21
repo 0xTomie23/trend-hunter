@@ -1,0 +1,44 @@
+{
+  "name": "meme-tracker-backend",
+  "version": "0.1.0",
+  "description": "Backend service for Meme Tracker",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "migrate": "prisma migrate dev",
+    "seed": "tsx src/scripts/seed.ts",
+    "generate": "prisma generate"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.7.1",
+    "@solana/web3.js": "^1.87.6",
+    "axios": "^1.6.2",
+    "bull": "^4.12.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "helius-sdk": "^1.3.4",
+    "ioredis": "^5.3.2",
+    "natural": "^6.10.4",
+    "node-cron": "^3.0.3",
+    "socket.io": "^4.6.2",
+    "string-similarity": "^4.0.4",
+    "twitter-api-v2": "^1.15.2",
+    "winston": "^3.11.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/natural": "^5.1.5",
+    "@types/node": "^20.10.5",
+    "@types/node-cron": "^3.0.11",
+    "@types/string-similarity": "^4.0.2",
+    "prisma": "^5.7.1",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}
+

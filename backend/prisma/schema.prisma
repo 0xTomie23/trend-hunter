@@ -1,0 +1,172 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model KOL {
+  id              Int       @id @default(autoincrement())
+  twitterHandle   String    @unique @map("twitter_handle")
+  twitterId       String    @unique @map("twitter_id")
+  name            String
+  followersCount  Int       @default(0) @map("followers_count")
+  isActive        Boolean   @default(true) @map("is_active")
+  priority        Int       @default(0)
+  lastTweetId     String?   @map("last_tweet_id")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  
+  tweets          Tweet[]
+
+  @@map("kols")
+}
+
+model Tweet {
+  id              Int       @id @default(autoincrement())
+  tweetId         String    @unique @map("tweet_id")
+  kolId           Int       @map("kol_id")
+  content         String
+  keywords        Json?
+  hotScore        Float     @default(0) @map("hot_score")
+  likes           Int       @default(0)
+  retweets        Int       @default(0)
+  replies         Int       @default(0)
+  tweetCreatedAt  DateTime  @map("tweet_created_at")
+  indexedAt       DateTime  @default(now()) @map("indexed_at")
+  
+  kol             KOL       @relation(fields: [kolId], references: [id], onDelete: Cascade)
+  topics          TopicTweet[]
+
+  @@index([kolId])
+  @@index([tweetCreatedAt])
+  @@index([hotScore])
+  @@map("tweets")
+}
+
+model HotTopic {
+  id              Int       @id @default(autoincrement())
+  keyword         String
+  totalMentions   Int       @default(1) @map("total_mentions")
+  hotScore        Float     @default(0) @map("hot_score")
+  firstSeenAt     DateTime  @map("first_seen_at")
+  lastSeenAt      DateTime  @map("last_seen_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  
+  tweets          TopicTweet[]
+  matches         TopicTokenMatch[]
+
+  @@index([keyword])
+  @@index([hotScore])
+  @@index([lastSeenAt])
+  @@map("hot_topics")
+}
+
+model TopicTweet {
+  topicId         Int       @map("topic_id")
+  tweetId         Int       @map("tweet_id")
+  
+  topic           HotTopic  @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  tweet           Tweet     @relation(fields: [tweetId], references: [id], onDelete: Cascade)
+
+  @@id([topicId, tweetId])
+  @@map("topic_tweets")
+}
+
+model Token {
+  id              Int       @id @default(autoincrement())
+  mintAddress     String    @unique @map("mint_address")
+  name            String
+  symbol          String
+  decimals        Int       @default(9)
+  logoUri         String?   @map("logo_uri")
+  description     String?
+  creatorAddress  String?   @map("creator_address")
+  tokenCreatedAt  DateTime? @map("token_created_at")
+  indexedAt       DateTime  @default(now()) @map("indexed_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  
+  marketData      TokenMarketData[]
+  pools           LiquidityPool[]
+  holders         HolderSnapshot[]
+  matches         TopicTokenMatch[]
+
+  @@index([mintAddress])
+  @@index([symbol])
+  @@map("tokens")
+}
+
+model TokenMarketData {
+  id                  Int       @id @default(autoincrement())
+  tokenId             Int       @map("token_id")
+  marketCap           Decimal?  @map("market_cap") @db.Decimal(20, 2)
+  price               Decimal?  @db.Decimal(20, 10)
+  priceChange24h      Float?    @map("price_change_24h")
+  volume24h           Decimal?  @map("volume_24h") @db.Decimal(20, 2)
+  holderCount         Int?      @map("holder_count")
+  transactionCount24h Int?      @map("transaction_count_24h")
+  liquidityUsd        Decimal?  @map("liquidity_usd") @db.Decimal(20, 2)
+  fdv                 Decimal?  @db.Decimal(20, 2)
+  timestamp           DateTime  @default(now())
+  
+  token               Token     @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+
+  @@index([tokenId])
+  @@index([timestamp])
+  @@map("token_market_data")
+}
+
+model LiquidityPool {
+  id              Int       @id @default(autoincrement())
+  tokenId         Int       @map("token_id")
+  poolAddress     String    @map("pool_address")
+  dex             String
+  baseToken       String    @map("base_token")
+  quoteToken      String    @map("quote_token")
+  liquidityUsd    Decimal?  @map("liquidity_usd") @db.Decimal(20, 2)
+  volume24h       Decimal?  @map("volume_24h") @db.Decimal(20, 2)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  
+  token           Token     @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+
+  @@unique([poolAddress, dex])
+  @@index([tokenId])
+  @@map("liquidity_pools")
+}
+
+model HolderSnapshot {
+  id                Int       @id @default(autoincrement())
+  tokenId           Int       @map("token_id")
+  totalHolders      Int       @map("total_holders")
+  top10Percentage   Float?    @map("top_10_percentage")
+  top20Percentage   Float?    @map("top_20_percentage")
+  snapshotAt        DateTime  @default(now()) @map("snapshot_at")
+  
+  token             Token     @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+
+  @@index([tokenId])
+  @@index([snapshotAt])
+  @@map("holder_snapshots")
+}
+
+model TopicTokenMatch {
+  id              Int       @id @default(autoincrement())
+  topicId         Int       @map("topic_id")
+  tokenId         Int       @map("token_id")
+  matchScore      Float     @map("match_score")
+  matchType       String    @map("match_type")
+  matchedAt       DateTime  @default(now()) @map("matched_at")
+  
+  topic           HotTopic  @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  token           Token     @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+
+  @@unique([topicId, tokenId])
+  @@index([topicId])
+  @@index([tokenId])
+  @@index([matchScore])
+  @@map("topic_token_matches")
+}
+
