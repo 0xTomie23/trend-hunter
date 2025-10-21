@@ -27,22 +27,6 @@ export const api = {
     const { data } = await apiClient.get('/tokens/search', { params })
     return data
   },
-
-  // KOLs
-  getKOLs: async () => {
-    const { data } = await apiClient.get('/kols')
-    return data
-  },
-
-  createKOL: async (kol: any) => {
-    const { data } = await apiClient.post('/kols', kol)
-    return data
-  },
-
-  deleteKOL: async (id: number) => {
-    const { data } = await apiClient.delete(`/kols/${id}`)
-    return data
-  },
 }
 
 export default apiClient

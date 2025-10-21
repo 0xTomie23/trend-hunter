@@ -106,50 +106,26 @@ export default function HomePage() {
                       value={topic.totalMentions}
                     />
                   </Col>
-                  <Col span={6}>
+                  <Col span={8}>
                     <Statistic
-                      title="匹配代币"
+                      title="相关代币"
                       value={topic.matches?.length || 0}
                       suffix="个"
                     />
                   </Col>
-                  <Col span={6}>
+                  <Col span={8}>
                     <Statistic
-                      title="相关推文"
-                      value={topic.tweets?.length || 0}
-                      suffix="条"
+                      title="首次发现"
+                      value={dayjs(topic.firstSeenAt).format('HH:mm')}
+                    />
+                  </Col>
+                  <Col span={8}>
+                    <Statistic
+                      title="最后更新"
+                      value={dayjs(topic.lastSeenAt).fromNow()}
                     />
                   </Col>
                 </Row>
-
-                {topic.tweets && topic.tweets.length > 0 && (
-                  <div style={{ marginBottom: 16 }}>
-                    <Text strong>最新推文：</Text>
-                    {topic.tweets.slice(0, 2).map((t: any) => (
-                      <Card
-                        key={t.tweet.id}
-                        size="small"
-                        style={{ marginTop: 8 }}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <Space direction="vertical" style={{ width: '100%' }}>
-                          <Space>
-                            <Text strong>@{t.tweet.kol.twitterHandle}</Text>
-                            <Text type="secondary">
-                              {dayjs(t.tweet.tweetCreatedAt).fromNow()}
-                            </Text>
-                          </Space>
-                          <Paragraph
-                            ellipsis={{ rows: 2 }}
-                            style={{ marginBottom: 0 }}
-                          >
-                            {t.tweet.content}
-                          </Paragraph>
-                        </Space>
-                      </Card>
-                    ))}
-                  </div>
-                )}
 
                 {topic.matches && topic.matches.length > 0 && (
                   <div>

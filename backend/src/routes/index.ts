@@ -217,64 +217,49 @@ router.get('/tokens/:mintAddress', async (req, res) => {
 });
 
 /**
- * GET /api/kols
- * Get KOL list
+ * GET /api/tokens/:mintAddress/full
+ * 获取代币完整信息（包括实时Helius数据）
  */
-router.get('/kols', async (req, res) => {
+router.get('/tokens/:mintAddress/full', async (req, res) => {
   try {
-    const kols = await prisma.kOL.findMany({
-      orderBy: {
-        priority: 'desc'
+    const { mintAddress } = req.params;
+    
+    // 从数据库获取
+    const token = await prisma.token.findUnique({
+      where: { mintAddress },
+      include: {
+        marketData: {
+          orderBy: { timestamp: 'desc' },
+          take: 1
+        },
+        pools: true,
+        matches: {
+          include: { topic: true }
+        }
       }
     });
     
-    res.json(kols);
-  } catch (error) {
-    console.error('Error fetching KOLs:', error);
-    res.status(500).json({ error: 'Failed to fetch KOLs' });
-  }
-});
-
-/**
- * POST /api/kols
- * Add a new KOL
- */
-router.post('/kols', async (req, res) => {
-  try {
-    const { twitterHandle, twitterId, name, priority = 0 } = req.body;
+    if (!token) {
+      return res.status(404).json({ error: 'Token not found' });
+    }
     
-    const kol = await prisma.kOL.create({
-      data: {
-        twitterHandle,
-        twitterId,
-        name,
-        priority
+    // 实时从 Helius 获取持有人数（如果可用）
+    let heliusData = null;
+    if (process.env.HELIUS_API_KEY) {
+      try {
+        heliusData = await chainDataService.getTokenFullInfo(mintAddress);
+      } catch (error) {
+        console.error('Failed to get Helius data:', error);
       }
+    }
+    
+    res.json({
+      ...token,
+      realtime: heliusData  // 实时数据
     });
-    
-    res.json(kol);
   } catch (error) {
-    console.error('Error creating KOL:', error);
-    res.status(500).json({ error: 'Failed to create KOL' });
-  }
-});
-
-/**
- * DELETE /api/kols/:id
- * Delete a KOL
- */
-router.delete('/kols/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    
-    await prisma.kOL.delete({
-      where: { id: parseInt(id) }
-    });
-    
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Error deleting KOL:', error);
-    res.status(500).json({ error: 'Failed to delete KOL' });
+    console.error('Error fetching token full info:', error);
+    res.status(500).json({ error: 'Failed to fetch token' });
   }
 });
 

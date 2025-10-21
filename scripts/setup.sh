@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# Meme Tracker 快速安装脚本
+# TrendHunter 快速安装脚本
 
 set -e
 
 echo "=================================="
-echo "Meme Tracker 快速安装"
+echo "TrendHunter 快速安装"
 echo "=================================="
 echo ""
 

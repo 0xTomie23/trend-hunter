@@ -1,5 +1,5 @@
 import { Layout, Menu } from 'antd'
-import { FireOutlined, TeamOutlined, SettingOutlined } from '@ant-design/icons'
+import { FireOutlined } from '@ant-design/icons'
 import { useNavigate, useLocation } from 'react-router-dom'
 
 const { Header: AntHeader } = Layout
@@ -14,11 +14,6 @@ export default function Header() {
       icon: <FireOutlined />,
       label: '热点追踪',
     },
-    {
-      key: '/kols',
-      icon: <TeamOutlined />,
-      label: 'KOL管理',
-    },
   ]
 
   return (
@@ -29,7 +24,7 @@ export default function Header() {
         fontWeight: 'bold',
         marginRight: '40px'
       }}>
-        🚀 Meme Tracker
+        🎯 TrendHunter
       </div>
       <Menu
         theme="dark"

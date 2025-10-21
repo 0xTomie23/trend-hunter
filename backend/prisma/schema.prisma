@@ -7,72 +7,25 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model KOL {
-  id              Int       @id @default(autoincrement())
-  twitterHandle   String    @unique @map("twitter_handle")
-  twitterId       String    @unique @map("twitter_id")
-  name            String
-  followersCount  Int       @default(0) @map("followers_count")
-  isActive        Boolean   @default(true) @map("is_active")
-  priority        Int       @default(0)
-  lastTweetId     String?   @map("last_tweet_id")
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
-  
-  tweets          Tweet[]
-
-  @@map("kols")
-}
-
-model Tweet {
-  id              Int       @id @default(autoincrement())
-  tweetId         String    @unique @map("tweet_id")
-  kolId           Int       @map("kol_id")
-  content         String
-  keywords        Json?
-  hotScore        Float     @default(0) @map("hot_score")
-  likes           Int       @default(0)
-  retweets        Int       @default(0)
-  replies         Int       @default(0)
-  tweetCreatedAt  DateTime  @map("tweet_created_at")
-  indexedAt       DateTime  @default(now()) @map("indexed_at")
-  
-  kol             KOL       @relation(fields: [kolId], references: [id], onDelete: Cascade)
-  topics          TopicTweet[]
-
-  @@index([kolId])
-  @@index([tweetCreatedAt])
-  @@index([hotScore])
-  @@map("tweets")
-}
-
+// ============================================
+// 核心表：热点话题
+// 基于链上代币名称聚类生成
+// ============================================
 model HotTopic {
   id              Int       @id @default(autoincrement())
   keyword         String
-  totalMentions   Int       @default(1) @map("total_mentions")
-  hotScore        Float     @default(0) @map("hot_score")
+  totalMentions   Int       @default(1) @map("total_mentions")  // 该话题下的代币数量
+  hotScore        Float     @default(0) @map("hot_score")       // 热度评分
   firstSeenAt     DateTime  @map("first_seen_at")
   lastSeenAt      DateTime  @map("last_seen_at")
   createdAt       DateTime  @default(now()) @map("created_at")
   
-  tweets          TopicTweet[]
   matches         TopicTokenMatch[]
 
   @@index([keyword])
   @@index([hotScore])
   @@index([lastSeenAt])
   @@map("hot_topics")
-}
-
-model TopicTweet {
-  topicId         Int       @map("topic_id")
-  tweetId         Int       @map("tweet_id")
-  
-  topic           HotTopic  @relation(fields: [topicId], references: [id], onDelete: Cascade)
-  tweet           Tweet     @relation(fields: [tweetId], references: [id], onDelete: Cascade)
-
-  @@id([topicId, tweetId])
-  @@map("topic_tweets")
 }
 
 model Token {

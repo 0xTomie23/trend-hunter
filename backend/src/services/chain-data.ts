@@ -37,15 +37,20 @@ interface DexScreenerPair {
 }
 
 export class ChainDataService {
-  private helius: Helius;
+  private helius?: Helius;
+  private hasHelius: boolean;
   
   constructor() {
     const apiKey = process.env.HELIUS_API_KEY;
-    if (!apiKey) {
-      throw new Error('HELIUS_API_KEY is required');
-    }
     
-    this.helius = new Helius(apiKey);
+    if (apiKey) {
+      this.helius = new Helius(apiKey);
+      this.hasHelius = true;
+      logger.info('✅ Helius RPC initialized');
+    } else {
+      this.hasHelius = false;
+      logger.warn('⚠️  HELIUS_API_KEY not set - using DexScreener only');
+    }
   }
   
   /**
@@ -75,6 +80,83 @@ export class ChainDataService {
   }
   
   /**
+   * 获取代币完整信息（从 DexScreener + Helius）
+   */
+  async getTokenFullInfo(mintAddress: string) {
+    try {
+      // 1. 从 DexScreener 获取市场数据
+      const dexData = await this.getTokenFromDexScreener(mintAddress);
+      
+      // 2. 从 Helius 获取链上数据（如果可用）
+      let heliusData = null;
+      if (this.hasHelius) {
+        heliusData = await this.getTokenMetadata(mintAddress);
+      }
+      
+      // 3. 合并数据
+      return {
+        mintAddress,
+        name: heliusData?.name || dexData?.name || 'Unknown',
+        symbol: heliusData?.symbol || dexData?.symbol || '???',
+        decimals: heliusData?.decimals || 9,
+        logoUri: heliusData?.logoUri || dexData?.logoUri,
+        description: heliusData?.description,
+        creatorAddress: heliusData?.creator,
+        
+        // 市场数据（来自 DexScreener）
+        price: dexData?.price,
+        marketCap: dexData?.marketCap,
+        liquidity: dexData?.liquidity,
+        volume24h: dexData?.volume24h,
+        priceChange24h: dexData?.priceChange24h,
+        
+        // 持有人数据（来自 Helius）
+        holderCount: this.hasHelius ? await this.getHolderCount(mintAddress) : 0,
+        
+        tokenCreatedAt: heliusData?.createdAt || new Date()
+      };
+    } catch (error) {
+      logger.error(`Failed to get full token info for ${mintAddress}:`, error);
+      return null;
+    }
+  }
+  
+  /**
+   * 从 DexScreener 获取代币数据
+   */
+  private async getTokenFromDexScreener(mintAddress: string) {
+    try {
+      const response = await axios.get(
+        `https://api.dexscreener.com/latest/dex/tokens/${mintAddress}`
+      );
+      
+      const pairs = response.data?.pairs || [];
+      if (pairs.length === 0) return null;
+      
+      // 使用流动性最高的交易对
+      const mainPair = pairs.sort((a: any, b: any) => 
+        (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0)
+      )[0];
+      
+      return {
+        name: mainPair.baseToken?.name,
+        symbol: mainPair.baseToken?.symbol,
+        logoUri: mainPair.info?.imageUrl,
+        price: mainPair.priceUsd ? parseFloat(mainPair.priceUsd) : null,
+        marketCap: mainPair.marketCap,
+        liquidity: mainPair.liquidity?.usd,
+        volume24h: mainPair.volume?.h24,
+        priceChange24h: mainPair.priceChange?.h24,
+        pairAddress: mainPair.pairAddress,
+        dex: mainPair.dexId
+      };
+    } catch (error) {
+      logger.error(`Failed to get DexScreener data for ${mintAddress}:`, error);
+      return null;
+    }
+  }
+  
+  /**
    * Get or create token in database
    */
   async getOrCreateToken(mintAddress: string): Promise<any> {
@@ -83,19 +165,24 @@ export class ChainDataService {
     });
     
     if (!token) {
-      // Fetch token metadata from Helius
-      const metadata = await this.getTokenMetadata(mintAddress);
+      // 获取完整信息
+      const fullInfo = await this.getTokenFullInfo(mintAddress);
+      
+      if (!fullInfo) {
+        logger.warn(`Cannot get info for ${mintAddress}`);
+        return null;
+      }
       
       token = await prisma.token.create({
         data: {
           mintAddress,
-          name: metadata.name || 'Unknown',
-          symbol: metadata.symbol || 'UNKNOWN',
-          decimals: metadata.decimals || 9,
-          logoUri: metadata.logoUri,
-          description: metadata.description,
-          creatorAddress: metadata.creator,
-          tokenCreatedAt: metadata.createdAt
+          name: fullInfo.name,
+          symbol: fullInfo.symbol,
+          decimals: fullInfo.decimals,
+          logoUri: fullInfo.logoUri,
+          description: fullInfo.description,
+          creatorAddress: fullInfo.creatorAddress,
+          tokenCreatedAt: fullInfo.tokenCreatedAt
         }
       });
       
@@ -107,8 +194,14 @@ export class ChainDataService {
   
   /**
    * Get token metadata from Helius
+   * 如果没有 Helius API Key，返回 null
    */
-  private async getTokenMetadata(mintAddress: string) {
+  async getTokenMetadata(mintAddress: string) {
+    if (!this.hasHelius || !this.helius) {
+      logger.debug('Helius not available, skipping metadata fetch');
+      return null;
+    }
+    
     try {
       const asset = await this.helius.rpc.getAsset({
         id: mintAddress
@@ -124,14 +217,7 @@ export class ChainDataService {
       };
     } catch (error) {
       logger.error(`Failed to get metadata for ${mintAddress}:`, error);
-      return {
-        name: null,
-        symbol: null,
-        logoUri: null,
-        description: null,
-        creator: null,
-        createdAt: null
-      };
+      return null;
     }
   }
   
@@ -209,8 +295,13 @@ export class ChainDataService {
   
   /**
    * Get holder count for a token
+   * 如果没有 Helius，返回 0
    */
-  private async getHolderCount(mintAddress: string): Promise<number> {
+  async getHolderCount(mintAddress: string): Promise<number> {
+    if (!this.hasHelius || !this.helius) {
+      return 0;
+    }
+    
     try {
       const accounts = await this.helius.rpc.getTokenAccounts({
         mint: mintAddress,

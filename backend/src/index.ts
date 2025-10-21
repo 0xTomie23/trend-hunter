@@ -7,6 +7,7 @@ import { logger } from './utils/logger';
 import { prisma } from './lib/prisma';
 import { initializeServices } from './services';
 import apiRoutes from './routes';
+import triggerRoutes from './routes/manual-trigger';
 
 dotenv.config();
 
@@ -32,6 +33,7 @@ app.use((req, res, next) => {
 
 // Routes
 app.use('/api', apiRoutes);
+app.use('/api/trigger', triggerRoutes);
 
 // Health check
 app.get('/health', (req, res) => {

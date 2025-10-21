@@ -1,7 +1,7 @@
 {
-  "name": "meme-tracker",
+  "name": "trend-hunter",
   "version": "0.1.0",
-  "description": "Meme Coin热点追踪平台",
+  "description": "TrendHunter - 链上热点话题相关meme信息聚合平台",
   "private": true,
   "workspaces": [
     "backend",

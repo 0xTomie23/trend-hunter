@@ -10,7 +10,7 @@ export const logger = winston.createLogger({
     winston.format.splat(),
     winston.format.json()
   ),
-  defaultMeta: { service: 'meme-tracker' },
+  defaultMeta: { service: 'trend-hunter' },
   transports: [
     new winston.transports.Console({
       format: winston.format.combine(

@@ -3,24 +3,24 @@ version: '3.8'
 services:
   postgres:
     image: postgres:15-alpine
-    container_name: meme-tracker-db
+    container_name: trend-hunter-db
     environment:
-      POSTGRES_USER: meme_tracker
-      POSTGRES_PASSWORD: meme_tracker_password
-      POSTGRES_DB: meme_tracker
+      POSTGRES_USER: trend_hunter
+      POSTGRES_PASSWORD: trend_hunter_password
+      POSTGRES_DB: trend_hunter
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U meme_tracker"]
+      test: ["CMD-SHELL", "pg_isready -U trend_hunter"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   redis:
     image: redis:7-alpine
-    container_name: meme-tracker-redis
+    container_name: trend-hunter-redis
     ports:
       - "6379:6379"
     volumes:

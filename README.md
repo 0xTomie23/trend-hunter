@@ -13,7 +13,7 @@
 ## 项目结构
 
 ```
-meme-tracker/
+trend-hunter/
 ├── backend/                  # 后端服务
 │   ├── prisma/
 │   │   └── schema.prisma    # 数据库模型
