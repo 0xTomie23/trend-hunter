@@ -1,8 +1,8 @@
 import { prisma } from '../lib/prisma';
 import { logger } from '../utils/logger';
 import { io } from '../index';
-import { ChineseSimilarityV2 } from '../utils/chinese-similarity-v2';
-import stringSimilarity from 'string-similarity';
+// import { ChineseSimilarityV2 } from '../utils/chinese-similarity-v2';  // TODO: 实现时取消注释
+// import stringSimilarity from 'string-similarity';  // TODO: 实现时取消注释
 import axios from 'axios';
 
 /**
@@ -32,20 +32,16 @@ export class SimpleTokenMonitor {
       // 2. 保存到数据库并获取完整信息
       const savedTokens = await this.saveTokensWithFullInfo(newTokens);
       
+      // ============================================
+      // TODO: 主题匹配算法 
+      // ============================================
       // 3. 聚类分析 - 找出相似代币（至少3个）
-      const clusters = this.findSimilarTokens(savedTokens);
-      
-      if (clusters.length === 0) {
-        logger.info('No clusters with 3+ tokens found');
-        return;
-      }
-      
-      logger.info(`Found ${clusters.length} clusters with ${this.MIN_CLUSTER_SIZE}+ tokens`);
+      // const clusters = this.findSimilarTokens(savedTokens);
       
       // 4. 生成热点话题
-      await this.createHotTopics(clusters);
+      // await this.createHotTopics(clusters);
       
-      logger.info(`✅ Created ${clusters.length} hot topics`);
+      logger.info(`✅ Processed ${savedTokens.length} tokens (主题匹配待实现)`);
       
     } catch (error) {
       logger.error('❌ Monitor error:', error);
@@ -53,47 +49,55 @@ export class SimpleTokenMonitor {
   }
   
   /**
-   * 从 DexScreener 获取最近的代币
+   * 获取最近的代币（使用 Birdeye）
    */
   private async fetchRecentTokens(): Promise<any[]> {
     try {
-      // 方案1: 获取最新交易对
+      // ============================================
+      // TODO: 调用 Birdeye API 获取新代币
+      // ============================================
+      const { birdeyeService } = await import('./index');
+      const tokens = await birdeyeService.getRecentTokens(6);  // 最近6小时
+      
+      if (tokens && tokens.length > 0) {
+        logger.info(`Fetched ${tokens.length} tokens from Birdeye`);
+        return tokens;
+      }
+      
+      // 降级方案：如果 Birdeye 失败，使用 DexScreener
+      logger.warn('Birdeye failed, falling back to DexScreener');
+      
       const response = await axios.get(
         'https://api.dexscreener.com/latest/dex/pairs/solana',
         { timeout: 10000 }
       );
       
       const pairs = response.data?.pairs || [];
-      
-      // 只要最近6小时创建的（增加时间范围以获取更多代币）
       const sixHoursAgo = Date.now() - 6 * 60 * 60 * 1000;
+      
       const recentPairs = pairs
         .filter((pair: any) => {
           const createdAt = pair.pairCreatedAt || 0;
-          return createdAt > sixHoursAgo;
-        })
-        .filter((pair: any) => {
-          // 过滤掉质量太低的代币
           const liquidity = pair.liquidity?.usd || 0;
-          return liquidity > 1000;  // 至少$1000流动性
+          return createdAt > sixHoursAgo && liquidity > 1000;
         })
-        .slice(0, 100); // 增加数量限制
+        .slice(0, 100);
       
       return recentPairs.map((pair: any) => ({
         mintAddress: pair.baseToken?.address,
         name: pair.baseToken?.name || 'Unknown',
         symbol: pair.baseToken?.symbol || '???',
         logoUri: pair.info?.imageUrl,
-        price: pair.priceUsd,
-        marketCap: pair.marketCap,
-        liquidity: pair.liquidity?.usd,
-        volume24h: pair.volume?.h24,
-        priceChange24h: pair.priceChange?.h24,
+        price: parseFloat(pair.priceUsd) || 0,
+        marketCap: pair.marketCap || 0,
+        liquidity: pair.liquidity?.usd || 0,
+        volume24h: pair.volume?.h24 || 0,
+        priceChange24h: pair.priceChange?.h24 || 0,
         createdAt: pair.pairCreatedAt || Date.now()
       }));
       
     } catch (error) {
-      logger.error('Failed to fetch from DexScreener:', error);
+      logger.error('Failed to fetch tokens:', error);
       return [];
     }
   }
@@ -171,90 +175,40 @@ export class SimpleTokenMonitor {
     return num.toFixed(2);
   }
   
+  // ============================================
+  // TODO: 主题匹配算法 
+  // ============================================
+  
   /**
-   * 核心算法：找出相似的代币并分组
+   * TODO: 找出相似的代币并分组
+   * 
+   * 参数: tokens - 代币列表
+   * 返回: 聚类数组，每个聚类至少3个代币
+   * 
+   * 实现思路：
+   * 1. 两两计算相似度
+   * 2. 相似度 > 阈值的归为一组
+   * 3. 只保留 >= 3个代币的聚类
    */
   private findSimilarTokens(tokens: any[]): any[][] {
-    if (tokens.length < 2) return [];
-    
-    const clusters: any[][] = [];
-    const processed = new Set<number>();
-    
-    for (let i = 0; i < tokens.length; i++) {
-      if (processed.has(tokens[i].id)) continue;
-      
-      const cluster = [tokens[i]];
-      processed.add(tokens[i].id);
-      
-      for (let j = i + 1; j < tokens.length; j++) {
-        if (processed.has(tokens[j].id)) continue;
-        
-        // 计算相似度
-        const similarity = this.calculateSimilarity(tokens[i], tokens[j]);
-        
-        // 相似度阈值
-        if (similarity > 0.55) {
-          cluster.push(tokens[j]);
-          processed.add(tokens[j].id);
-          
-          logger.info(
-            `🔗 Matched: ${tokens[i].symbol} <-> ${tokens[j].symbol} (${similarity.toFixed(2)})`
-          );
-        }
-      }
-      
-      // 只保留有3个以上代币的聚类（确认是热点）
-      if (cluster.length >= this.MIN_CLUSTER_SIZE) {
-        clusters.push(cluster);
-        logger.info(`📦 Found cluster with ${cluster.length} tokens`);
-      }
-    }
-    
-    return clusters;
+    // TODO: 实现聚类算法
+    return [];
   }
   
   /**
-   * 计算两个代币的相似度
-   * 支持中文音近字识别
+   * TODO: 计算两个代币的相似度
+   * 
+   * 参数: token1, token2 - 代币对象
+   * 返回: 0-1之间的相似度分数
+   * 
+   * 实现思路：
+   * 1. 检测是否中文代币
+   * 2. 中文：使用拼音匹配（ChineseSimilarityV2）
+   * 3. 英文：使用 Symbol + Name 相似度
    */
   private calculateSimilarity(token1: any, token2: any): number {
-    const name1 = token1.name;
-    const name2 = token2.name;
-    
-    // 检测是否包含中文
-    const hasChinese1 = /[\u4e00-\u9fa5]/.test(name1);
-    const hasChinese2 = /[\u4e00-\u9fa5]/.test(name2);
-    
-    // 如果都包含中文，使用中文优化算法
-    if (hasChinese1 && hasChinese2) {
-      return ChineseSimilarityV2.calculate(name1, name2);
-    }
-    
-    // 否则使用标准算法
-    const symbolSim = stringSimilarity.compareTwoStrings(
-      this.normalize(token1.symbol),
-      this.normalize(token2.symbol)
-    );
-    
-    const nameSim = stringSimilarity.compareTwoStrings(
-      this.normalize(token1.name),
-      this.normalize(token2.name)
-    );
-    
-    const keywords1 = this.extractKeywords(token1);
-    const keywords2 = this.extractKeywords(token2);
-    const commonKeywords = keywords1.filter(k => keywords2.includes(k));
-    const keywordScore = commonKeywords.length > 0 ? 0.4 : 0;
-    
-    const name1Norm = this.normalize(token1.name);
-    const name2Norm = this.normalize(token2.name);
-    
-    let containsBonus = 0;
-    if (name1Norm.includes(name2Norm) || name2Norm.includes(name1Norm)) {
-      containsBonus = 0.2;
-    }
-    
-    return symbolSim * 0.5 + nameSim * 0.3 + keywordScore * 0.15 + containsBonus * 0.05;
+    // TODO: 实现相似度计算
+    return 0;
   }
   
   /**
@@ -307,179 +261,55 @@ export class SimpleTokenMonitor {
     return Array.from(keywords);
   }
   
+  // ============================================
+  // TODO: 主题匹配算法 - 明天实现
+  // ============================================
+  
   /**
-   * 为聚类创建热点话题
+   * TODO: 为聚类创建热点话题
+   * 
+   * 参数: clusters - 聚类数组，每个聚类是代币数组
+   * 
+   * 实现步骤：
+   * 1. 提取主题关键词（从代币名称中找最高频词）
+   * 2. 计算热度分数（代币数 + 市值 + 流动性 + 时间）
+   * 3. 创建 HotTopic 记录
+   * 4. 创建 TopicTokenMatch 关联
+   * 5. 推送到前端（Socket.io）
+   * 
+   * 数据示例：
+   * cluster = [
+   *   { name: "索拉拉", marketData: [{ marketCap: 50000 }] },
+   *   { name: "锁啦啦", marketData: [{ marketCap: 60000 }] },
+   *   { name: "索拉币", marketData: [{ marketCap: 40000 }] }
+   * ]
+   * 
+   * 应该创建：
+   * topic = {
+   *   keyword: "索拉",
+   *   totalMentions: 3,
+   *   hotScore: 285
+   * }
    */
   private async createHotTopics(clusters: any[][]) {
-    for (const cluster of clusters) {
-      try {
-        // 1. 找出最具代表性的关键词
-        const keyword = this.findBestKeyword(cluster);
-        
-        if (!keyword) continue;
-        
-        // 2. 计算热度分数
-        const hotScore = this.calculateHotScore(cluster);
-        
-        // 3. 创建或更新话题
-        const now = new Date();
-        let topic = await prisma.hotTopic.findFirst({
-          where: { keyword }
-        });
-        
-        if (!topic) {
-          topic = await prisma.hotTopic.create({
-            data: {
-              keyword,
-              totalMentions: cluster.length,
-              hotScore,
-              firstSeenAt: now,
-              lastSeenAt: now
-            }
-          });
-          
-          logger.info(`🔥 New hot topic: ${keyword} (${cluster.length} tokens)`);
-        } else {
-          topic = await prisma.hotTopic.update({
-            where: { id: topic.id },
-            data: {
-              totalMentions: Math.max(topic.totalMentions, cluster.length),
-              hotScore: Math.max(topic.hotScore, hotScore),
-              lastSeenAt: now
-            }
-          });
-        }
-        
-        // 4. 关联代币
-        for (const token of cluster) {
-          await prisma.topicTokenMatch.upsert({
-            where: {
-              topicId_tokenId: {
-                topicId: topic.id,
-                tokenId: token.id
-              }
-            },
-            create: {
-              topicId: topic.id,
-              tokenId: token.id,
-              matchScore: 0.85,
-              matchType: 'cluster'
-            },
-            update: {
-              matchScore: 0.85
-            }
-          });
-        }
-        
-        // 5. 计算聚类的总体数据
-        const totalMarketCap = cluster.reduce((sum, t) => 
-          sum + (t.marketData?.[0]?.marketCap ? Number(t.marketData[0].marketCap) : 0), 0
-        );
-        const totalLiquidity = cluster.reduce((sum, t) => 
-          sum + (t.marketData?.[0]?.liquidityUsd ? Number(t.marketData[0].liquidityUsd) : 0), 0
-        );
-        const totalVolume = cluster.reduce((sum, t) => 
-          sum + (t.marketData?.[0]?.volume24h ? Number(t.marketData[0].volume24h) : 0), 0
-        );
-        
-        logger.info(
-          `🔥 Topic "${keyword}": ${cluster.length} tokens, MC: $${this.formatNumber(totalMarketCap)}, Liquidity: $${this.formatNumber(totalLiquidity)}`
-        );
-        
-        // 6. 广播更新
-        io.to('hot-topics').emit('new_topic', {
-          topic,
-          tokenCount: cluster.length,
-          totalMarketCap,
-          totalLiquidity,
-          totalVolume,
-          tokens: cluster.map(t => ({
-            id: t.id,
-            symbol: t.symbol,
-            name: t.name,
-            mintAddress: t.mintAddress,
-            price: t.marketData?.[0]?.price,
-            marketCap: t.marketData?.[0]?.marketCap,
-            liquidity: t.marketData?.[0]?.liquidityUsd,
-            volume24h: t.marketData?.[0]?.volume24h,
-            priceChange24h: t.marketData?.[0]?.priceChange24h,
-            holderCount: t.marketData?.[0]?.holderCount
-          }))
-        });
-        
-      } catch (error) {
-        logger.error('Failed to create hot topic:', error);
-      }
-    }
+    // TODO: 实现热点话题生成
+    logger.warn('⚠️  createHotTopics() 待实现');
   }
   
   /**
-   * 从聚类中找出最佳关键词作为话题名
+   * TODO: 提取主题关键词
    */
   private findBestKeyword(cluster: any[]): string {
-    // 收集所有关键词
-    const allKeywords: string[] = [];
-    cluster.forEach(token => {
-      allKeywords.push(...this.extractKeywords(token));
-    });
-    
-    // 统计频率
-    const freq: Record<string, number> = {};
-    allKeywords.forEach(kw => {
-      freq[kw] = (freq[kw] || 0) + 1;
-    });
-    
-    // 找出最高频的关键词
-    let bestKeyword = '';
-    let maxFreq = 0;
-    
-    for (const [kw, count] of Object.entries(freq)) {
-      // 过滤掉太短或太常见的词
-      if (kw.length < 2 || ['coin', 'token', '币'].includes(kw)) {
-        continue;
-      }
-      
-      if (count > maxFreq) {
-        maxFreq = count;
-        bestKeyword = kw;
-      }
-    }
-    
-    // 如果没找到，用第一个代币的symbol
-    return bestKeyword || cluster[0].symbol.toLowerCase();
+    // TODO: 从聚类中提取最具代表性的关键词
+    return '';
   }
   
   /**
-   * 计算聚类的热度分数
+   * TODO: 计算热度分数
    */
   private calculateHotScore(cluster: any[]): number {
-    // 1. 代币数量分数
-    const quantityScore = cluster.length * 15;
-    
-    // 2. 市值分数（对数缩放）
-    const totalMarketCap = cluster.reduce(
-      (sum, token) => sum + (token.marketData?.[0]?.marketCap || 0),
-      0
-    );
-    const marketCapScore = Math.log10(Math.max(totalMarketCap, 1)) * 8;
-    
-    // 3. 流动性分数
-    const totalLiquidity = cluster.reduce(
-      (sum, token) => sum + (token.marketData?.[0]?.liquidityUsd || 0),
-      0
-    );
-    const liquidityScore = Math.log10(Math.max(totalLiquidity, 1)) * 5;
-    
-    // 4. 时间因素（越新越热）
-    const avgAge = cluster.reduce((sum, token) => {
-      const age = Date.now() - (token.tokenCreatedAt?.getTime() || Date.now());
-      return sum + age;
-    }, 0) / cluster.length;
-    
-    const hoursSinceCreation = avgAge / (60 * 60 * 1000);
-    const timeScore = Math.max(0, 50 - hoursSinceCreation * 2);
-    
-    return Math.round(quantityScore + marketCapScore + liquidityScore + timeScore);
+    // TODO: 综合代币数、市值、流动性、时间等因素
+    return 0;
   }
 }
 

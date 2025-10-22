@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { prisma } from '../lib/prisma';
-import { chainDataService } from '../services';
+import { birdeyeService } from '../services';
 
 const router = Router();
 
@@ -243,19 +243,17 @@ router.get('/tokens/:mintAddress/full', async (req, res) => {
       return res.status(404).json({ error: 'Token not found' });
     }
     
-    // 实时从 Helius 获取持有人数（如果可用）
-    let heliusData = null;
-    if (process.env.HELIUS_API_KEY) {
-      try {
-        heliusData = await chainDataService.getTokenFullInfo(mintAddress);
-      } catch (error) {
-        console.error('Failed to get Helius data:', error);
-      }
+    // 实时从 Birdeye 获取完整数据
+    let birdeyeData = null;
+    try {
+      birdeyeData = await birdeyeService.getTokenFullInfo(mintAddress);
+    } catch (error) {
+      console.error('Failed to get Birdeye data:', error);
     }
     
     res.json({
       ...token,
-      realtime: heliusData  // 实时数据
+      realtime: birdeyeData  // 实时 Birdeye 数据
     });
   } catch (error) {
     console.error('Error fetching token full info:', error);
