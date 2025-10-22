@@ -44,8 +44,11 @@ const CryptoTable = () => {
       starred: savedFavorites[item.id] === true
     }));
     
+    // 初始按首个话题过滤
+    const filteredByTopic = initialData.filter(item => item.topic === marketCategories[0]);
+    
     // 对数据进行排序，收藏项置顶
-    const sortedData = [...initialData].sort((a, b) => {
+    const sortedData = [...filteredByTopic].sort((a, b) => {
       if (a.starred && !b.starred) return -1;
       if (!a.starred && b.starred) return 1;
       return a.id - b.id;
@@ -87,37 +90,11 @@ const CryptoTable = () => {
   // 处理话题切换
   const handleTopicChange = (event, newValue) => {
     setActiveTopic(newValue);
-    
-    // 模拟从后端获取数据的过程
     setLoading(true);
-    
-    // 这里是后端接口调用的位置
-    // 实际项目中应该替换为真实的API调用
-    // fetchDataByTopic(marketCategories[newValue])
-    //   .then(response => {
-    //     setData(response.data);
-    //     setLoading(false);
-    //   })
-    //   .catch(error => {
-    //     console.error('获取数据失败:', error);
-    //     setLoading(false);
-    //   });
-    
-    // 模拟API调用延迟
+
     setTimeout(() => {
-      // 根据选中的话题过滤数据（模拟后端返回的数据）
-      const filteredData = cryptoData.filter((_, index) => {
-        if (newValue === 0) return true; // 热门显示所有数据
-        if (newValue === 1) return index % 2 === 0; // 飙升显示部分数据
-        if (newValue === 2) return index % 3 === 0; // 美股显示部分数据
-        if (newValue === 3) return index < 3; // 下个蓝筹显示前3条数据
-        return true;
-      });
-      
+      const filteredData = cryptoData.filter((item) => item.topic === marketCategories[newValue]);
       setData(filteredData);
-      // 切换话题时重置排序状态
-      setSortBy(null);
-      setSortMode('default');
       setLoading(false);
     }, 500);
   };
@@ -200,14 +177,28 @@ const CryptoTable = () => {
           value={activeTopic}
           onChange={handleTopicChange}
           variant="scrollable"
-          scrollButtons="auto"
+          scrollButtons={false}
           textColor="inherit"
           TabIndicatorProps={{
             style: {
               backgroundColor: '#f6c549'
             }
           }}
-          sx={{ minHeight: 36 }}
+          sx={{ 
+            minHeight: 36,
+            '& .MuiTabs-scroller': {
+              overflowX: 'auto',
+              overflowY: 'hidden',
+              // 自定义滚动条样式（WebKit）
+              '&::-webkit-scrollbar': { height: '6px' },
+              '&::-webkit-scrollbar-thumb': { backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: '3px' },
+              '&::-webkit-scrollbar-track': { backgroundColor: 'rgba(255,255,255,0.08)' }
+            },
+            '& .MuiTabs-flexContainer': {
+              whiteSpace: 'nowrap',
+              gap: 1
+            }
+          }}
         >
           {marketCategories.map((category, index) => (
             <Tab 
@@ -219,7 +210,9 @@ const CryptoTable = () => {
                 fontSize: 16,
                 minHeight: 36,
                 lineHeight: '36px',
-                py: 0
+                py: 0,
+                minWidth: 'auto',
+                px: 1.25
               }}
             />
           ))}
