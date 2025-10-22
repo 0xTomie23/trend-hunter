@@ -1,8 +1,12 @@
 import { Router } from 'express';
 import { prisma } from '../lib/prisma';
 import { birdeyeService } from '../services';
+import userRoutes from './user';
 
 const router = Router();
+
+// 挂载用户相关路由
+router.use('/', userRoutes);
 
 /**
  * GET /api/hot-topics

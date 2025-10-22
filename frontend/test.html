@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>代币数据测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #121212;
+            color: #fff;
+        }
+        .card {
+            background: #1e1e1e;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .data-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #333;
+        }
+        .label {
+            color: #999;
+        }
+        .value {
+            font-weight: bold;
+        }
+        .positive {
+            color: #4caf50;
+        }
+        .negative {
+            color: #f44336;
+        }
+        button {
+            background: #3ddc84;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background: #46f092;
+        }
+        #loading {
+            text-align: center;
+            padding: 40px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎯 TrendHunter - 实时代币数据测试</h1>
+    
+    <div class="card">
+        <h2>索拉拉 (SOLA)</h2>
+        <p style="color: #666; font-size: 12px; word-break: break-all;">
+            CA: CY1P83KnKwFYostvjQcoR2HJLyEJWRBRaVQmYyyD3cR8
+        </p>
+        
+        <div id="loading">加载中...</div>
+        
+        <div id="tokenData" style="display: none;">
+            <div class="data-row">
+                <span class="label">当前价格</span>
+                <span class="value" id="price">-</span>
+            </div>
+            <div class="data-row">
+                <span class="label">24小时涨跌</span>
+                <span class="value" id="priceChange">-</span>
+            </div>
+            <div class="data-row">
+                <span class="label">市值</span>
+                <span class="value" id="marketCap">-</span>
+            </div>
+            <div class="data-row">
+                <span class="label">流动性</span>
+                <span class="value" id="liquidity">-</span>
+            </div>
+            <div class="data-row">
+                <span class="label">24小时交易量</span>
+                <span class="value" id="volume">-</span>
+            </div>
+            <div class="data-row">
+                <span class="label">DEX</span>
+                <span class="value" id="dex">-</span>
+            </div>
+        </div>
+        
+        <div style="margin-top: 20px; text-align: center;">
+            <button onclick="loadData()">🔄 刷新数据</button>
+            <span id="lastUpdate" style="margin-left: 20px; color: #666; font-size: 12px;"></span>
+        </div>
+    </div>
+    
+    <div class="card">
+        <h3>📡 数据来源</h3>
+        <p>✅ Birdeye API (价格、涨跌)</p>
+        <p>✅ DexScreener API (市值、流动性、交易量)</p>
+        <p>🔄 自动刷新: 每30秒</p>
+    </div>
+
+    <script>
+        let autoRefreshInterval;
+        
+        async function loadData() {
+            try {
+                const response = await fetch('http://localhost:3000/api/demo/test-token');
+                const result = await response.json();
+                
+                if (result.success && result.data) {
+                    const data = result.data;
+                    
+                    // 更新UI
+                    document.getElementById('price').textContent = `$${data.price?.toFixed(6) || 0}`;
+                    
+                    const priceChange = data.priceChange24h || 0;
+                    const priceChangeEl = document.getElementById('priceChange');
+                    priceChangeEl.textContent = `${priceChange >= 0 ? '+' : ''}${priceChange.toFixed(2)}%`;
+                    priceChangeEl.className = `value ${priceChange >= 0 ? 'positive' : 'negative'}`;
+                    
+                    document.getElementById('marketCap').textContent = `$${data.marketCap?.toLocaleString() || 0}`;
+                    document.getElementById('liquidity').textContent = `$${data.liquidity?.toLocaleString() || 0}`;
+                    document.getElementById('volume').textContent = `$${data.volume24h?.toLocaleString() || 0}`;
+                    document.getElementById('dex').textContent = data.dex?.toUpperCase() || 'Unknown';
+                    
+                    document.getElementById('loading').style.display = 'none';
+                    document.getElementById('tokenData').style.display = 'block';
+                    
+                    const now = new Date().toLocaleTimeString('zh-CN');
+                    document.getElementById('lastUpdate').textContent = `最后更新: ${now}`;
+                    
+                    console.log('✅ 数据加载成功:', data);
+                } else {
+                    document.getElementById('loading').textContent = '❌ 加载失败';
+                }
+            } catch (error) {
+                console.error('加载失败:', error);
+                document.getElementById('loading').textContent = '❌ 无法连接到后端';
+            }
+        }
+        
+        // 页面加载时获取数据
+        loadData();
+        
+        // 每30秒自动刷新
+        autoRefreshInterval = setInterval(loadData, 30000);
+        
+        console.log('🚀 测试页面已加载');
+        console.log('📡 后端API: http://localhost:3000/api/demo/test-token');
+    </script>
+</body>
+</html>
+

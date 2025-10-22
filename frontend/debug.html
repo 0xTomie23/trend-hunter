@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TrendHunter - 简单测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #121212;
+            color: #fff;
+        }
+        .status {
+            background: #1e1e1e;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .success { border-color: #4caf50; }
+        .error { border-color: #f44336; }
+        .warning { border-color: #ff9800; }
+        button {
+            background: #3ddc84;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+        button:hover { background: #46f092; }
+        pre { background: #000; padding: 10px; border-radius: 5px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>🎯 TrendHunter - 诊断页面</h1>
+    
+    <div class="status" id="frontend-status">
+        <h3>前端服务器状态</h3>
+        <p id="frontend-info">检查中...</p>
+    </div>
+    
+    <div class="status" id="backend-status">
+        <h3>后端API状态</h3>
+        <p id="backend-info">检查中...</p>
+    </div>
+    
+    <div class="status" id="data-status">
+        <h3>代币数据</h3>
+        <p id="data-info">检查中...</p>
+    </div>
+    
+    <div style="text-align: center; margin-top: 30px;">
+        <button onclick="checkAll()">🔄 重新检查</button>
+        <button onclick="window.open('http://localhost:5173', '_blank')">🚀 打开主应用</button>
+        <button onclick="window.open('http://localhost:3000/api/demo/test-token', '_blank')">📡 查看API</button>
+    </div>
+
+    <script>
+        async function checkFrontend() {
+            try {
+                const response = await fetch('http://localhost:5173');
+                const html = await response.text();
+                
+                if (html.includes('TrendHunter')) {
+                    document.getElementById('frontend-status').className = 'status success';
+                    document.getElementById('frontend-info').innerHTML = '✅ 前端服务器正常运行<br>地址: http://localhost:5173';
+                } else {
+                    throw new Error('页面内容异常');
+                }
+            } catch (error) {
+                document.getElementById('frontend-status').className = 'status error';
+                document.getElementById('frontend-info').innerHTML = '❌ 前端服务器异常<br>错误: ' + error.message;
+            }
+        }
+        
+        async function checkBackend() {
+            try {
+                const response = await fetch('http://localhost:3000/api/demo/test-token');
+                const data = await response.json();
+                
+                if (data.success) {
+                    document.getElementById('backend-status').className = 'status success';
+                    document.getElementById('backend-info').innerHTML = '✅ 后端API正常运行<br>地址: http://localhost:3000';
+                } else {
+                    throw new Error('API返回失败');
+                }
+            } catch (error) {
+                document.getElementById('backend-status').className = 'status error';
+                document.getElementById('backend-info').innerHTML = '❌ 后端API异常<br>错误: ' + error.message;
+            }
+        }
+        
+        async function checkData() {
+            try {
+                const response = await fetch('http://localhost:3000/api/demo/test-token');
+                const data = await response.json();
+                
+                if (data.success && data.data) {
+                    const token = data.data;
+                    document.getElementById('data-status').className = 'status success';
+                    document.getElementById('data-info').innerHTML = `
+                        ✅ 代币数据正常<br>
+                        <strong>${token.name} (${token.symbol})</strong><br>
+                        价格: $${token.price?.toFixed(6)}<br>
+                        涨跌: ${token.priceChange24h >= 0 ? '+' : ''}${token.priceChange24h?.toFixed(2)}%<br>
+                        市值: $${token.marketCap?.toLocaleString()}
+                    `;
+                } else {
+                    throw new Error('数据格式异常');
+                }
+            } catch (error) {
+                document.getElementById('data-status').className = 'status error';
+                document.getElementById('data-info').innerHTML = '❌ 代币数据异常<br>错误: ' + error.message;
+            }
+        }
+        
+        async function checkAll() {
+            await Promise.all([
+                checkFrontend(),
+                checkBackend(),
+                checkData()
+            ]);
+        }
+        
+        // 页面加载时自动检查
+        checkAll();
+        
+        console.log('🔍 诊断页面已加载');
+    </script>
+</body>
+</html>

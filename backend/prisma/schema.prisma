@@ -3,31 +3,51 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider = "sqlite"
+  url      = "file:./dev.db"
 }
 
 // ============================================
-// 核心表：热点话题
-// 基于链上代币名称聚类生成
+// 用户管理
 // ============================================
-model HotTopic {
+model User {
   id              Int       @id @default(autoincrement())
-  keyword         String
-  totalMentions   Int       @default(1) @map("total_mentions")  // 该话题下的代币数量
-  hotScore        Float     @default(0) @map("hot_score")       // 热度评分
-  firstSeenAt     DateTime  @map("first_seen_at")
-  lastSeenAt      DateTime  @map("last_seen_at")
+  walletAddress   String    @unique @map("wallet_address")
+  username        String?
   createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
   
-  matches         TopicTokenMatch[]
-
-  @@index([keyword])
-  @@index([hotScore])
-  @@index([lastSeenAt])
-  @@map("hot_topics")
+  // 用户创建的主题
+  topics          Topic[]
+  
+  @@index([walletAddress])
+  @@map("users")
 }
 
+// ============================================
+// 主题管理（用户手动创建）
+// ============================================
+model Topic {
+  id              Int       @id @default(autoincrement())
+  name            String
+  description     String?
+  userId          Int       @map("user_id")
+  order           Int        @default(0)  // 排序顺序
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  
+  // 关联
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokens          TopicToken[]
+  
+  @@index([userId])
+  @@index([order])
+  @@map("topics")
+}
+
+// ============================================
+// 代币信息
+// ============================================
 model Token {
   id              Int       @id @default(autoincrement())
   mintAddress     String    @unique @map("mint_address")
@@ -36,32 +56,51 @@ model Token {
   decimals        Int       @default(9)
   logoUri         String?   @map("logo_uri")
   description     String?
-  creatorAddress  String?   @map("creator_address")
-  tokenCreatedAt  DateTime? @map("token_created_at")
-  indexedAt       DateTime  @default(now()) @map("indexed_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
   
+  // 关联
+  topicTokens     TopicToken[]
   marketData      TokenMarketData[]
-  pools           LiquidityPool[]
-  holders         HolderSnapshot[]
-  matches         TopicTokenMatch[]
-
+  
   @@index([mintAddress])
   @@index([symbol])
   @@map("tokens")
 }
 
+// ============================================
+// 主题-代币关联表
+// ============================================
+model TopicToken {
+  id              Int       @id @default(autoincrement())
+  topicId         Int       @map("topic_id")
+  tokenId         Int       @map("token_id")
+  addedAt         DateTime  @default(now()) @map("added_at")
+  
+  // 关联
+  topic           Topic     @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  token           Token     @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+  
+  @@unique([topicId, tokenId])
+  @@index([topicId])
+  @@index([tokenId])
+  @@map("topic_tokens")
+}
+
+// ============================================
+// 代币市场数据
+// ============================================
 model TokenMarketData {
   id                  Int       @id @default(autoincrement())
   tokenId             Int       @map("token_id")
-  marketCap           Decimal?  @map("market_cap") @db.Decimal(20, 2)
-  price               Decimal?  @db.Decimal(20, 10)
+  price               Float?
   priceChange24h      Float?    @map("price_change_24h")
-  volume24h           Decimal?  @map("volume_24h") @db.Decimal(20, 2)
+  marketCap           Float?    @map("market_cap")
+  volume24h           Float?    @map("volume_24h")
+  liquidity           Float?
   holderCount         Int?      @map("holder_count")
-  transactionCount24h Int?      @map("transaction_count_24h")
-  liquidityUsd        Decimal?  @map("liquidity_usd") @db.Decimal(20, 2)
-  fdv                 Decimal?  @db.Decimal(20, 2)
+  transactionCount24h Int?     @map("transaction_count_24h")
+  fdv                 Float?
   timestamp           DateTime  @default(now())
   
   token               Token     @relation(fields: [tokenId], references: [id], onDelete: Cascade)
@@ -69,57 +108,5 @@ model TokenMarketData {
   @@index([tokenId])
   @@index([timestamp])
   @@map("token_market_data")
-}
-
-model LiquidityPool {
-  id              Int       @id @default(autoincrement())
-  tokenId         Int       @map("token_id")
-  poolAddress     String    @map("pool_address")
-  dex             String
-  baseToken       String    @map("base_token")
-  quoteToken      String    @map("quote_token")
-  liquidityUsd    Decimal?  @map("liquidity_usd") @db.Decimal(20, 2)
-  volume24h       Decimal?  @map("volume_24h") @db.Decimal(20, 2)
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
-  
-  token           Token     @relation(fields: [tokenId], references: [id], onDelete: Cascade)
-
-  @@unique([poolAddress, dex])
-  @@index([tokenId])
-  @@map("liquidity_pools")
-}
-
-model HolderSnapshot {
-  id                Int       @id @default(autoincrement())
-  tokenId           Int       @map("token_id")
-  totalHolders      Int       @map("total_holders")
-  top10Percentage   Float?    @map("top_10_percentage")
-  top20Percentage   Float?    @map("top_20_percentage")
-  snapshotAt        DateTime  @default(now()) @map("snapshot_at")
-  
-  token             Token     @relation(fields: [tokenId], references: [id], onDelete: Cascade)
-
-  @@index([tokenId])
-  @@index([snapshotAt])
-  @@map("holder_snapshots")
-}
-
-model TopicTokenMatch {
-  id              Int       @id @default(autoincrement())
-  topicId         Int       @map("topic_id")
-  tokenId         Int       @map("token_id")
-  matchScore      Float     @map("match_score")
-  matchType       String    @map("match_type")
-  matchedAt       DateTime  @default(now()) @map("matched_at")
-  
-  topic           HotTopic  @relation(fields: [topicId], references: [id], onDelete: Cascade)
-  token           Token     @relation(fields: [tokenId], references: [id], onDelete: Cascade)
-
-  @@unique([topicId, tokenId])
-  @@index([topicId])
-  @@index([tokenId])
-  @@index([matchScore])
-  @@map("topic_token_matches")
 }
 

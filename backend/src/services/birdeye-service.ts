@@ -10,6 +10,8 @@ import { logger } from '../utils/logger';
 export class BirdeyeService {
   private apiKey: string;
   private baseUrl: string = 'https://public-api.birdeye.so';
+  private cache: Map<string, { data: any; timestamp: number }> = new Map();
+  private readonly CACHE_DURATION = 5000; // 5秒缓存
   
   constructor() {
     const apiKey = process.env.BIRDEYE_API_KEY;
@@ -22,6 +24,27 @@ export class BirdeyeService {
     logger.info('✅ Birdeye API initialized');
   }
   
+  /**
+   * 获取缓存数据
+   */
+  private getCachedData(key: string): any | null {
+    const cached = this.cache.get(key);
+    if (cached && Date.now() - cached.timestamp < this.CACHE_DURATION) {
+      return cached.data;
+    }
+    return null;
+  }
+
+  /**
+   * 设置缓存数据
+   */
+  private setCachedData(key: string, data: any): void {
+    this.cache.set(key, {
+      data,
+      timestamp: Date.now()
+    });
+  }
+
   /**
    * 通用请求方法（带限流和重试）
    */
@@ -238,76 +261,163 @@ export class BirdeyeService {
   }
   
   /**
-   * 获取代币完整信息（整合所有数据）
+   * 快速获取代币基本信息（名字、符号、图片）- 优先级最高
+   * 用于快速显示代币基本信息
    */
-  async getTokenFullInfo(mintAddress: string) {
+  async getTokenBasicInfo(mintAddress: string) {
     try {
-      logger.info(`Fetching full info for ${mintAddress} from Birdeye...`);
+      logger.info(`Fetching basic info for ${mintAddress}...`);
       
-      // 优先使用 token_overview（一次调用获取大部分数据）
-      let overview = null;
-      try {
-        overview = await this.request('/defi/token_overview', {
-          address: mintAddress
-        });
-      } catch (error: any) {
-        if (error.response?.status !== 429) {
-          logger.warn('token_overview failed, using separate APIs');
-        }
-      }
+      // 只调用 DexScreener 获取基本信息（速度快）
+      const dexData = await this.getDexScreenerData(mintAddress);
       
-      // 如果 overview 成功，优先使用它的数据
-      if (overview?.success && overview.data) {
-        const data = overview.data;
-        
+      if (dexData) {
         return {
           mintAddress,
-          name: data.name || 'Unknown',
-          symbol: data.symbol || '???',
-          decimals: data.decimals || 9,
-          logoUri: data.logoURI || data.logo || null,
-          supply: data.supply || data.realSupply || 0,
-          
-          price: data.price || 0,
-          priceChange24h: data.priceChange24h || 0,
-          marketCap: data.mc || 0,
-          volume24h: data.v24hUSD || 0,
-          fdv: data.fdv || 0,
-          liquidity: data.liquidity || 0,
-          
-          holderCount: data.holder || 0,
-          transactionCount24h: data.trade24h || 0
-        };
-      }
-      
-      // 如果 overview 失败，降级使用价格 API（更稳定）
-      const priceData = await this.getTokenPrice(mintAddress);
-      
-      if (priceData) {
-        return {
-          mintAddress,
-          name: 'Unknown',
-          symbol: '???',
+          name: dexData.name || 'Unknown',
+          symbol: dexData.symbol || '???',
           decimals: 9,
-          logoUri: null,
-          supply: 0,
-          
-          price: priceData.price,
-          priceChange24h: priceData.priceChange24h,
-          marketCap: 0,
-          volume24h: 0,
-          fdv: 0,
-          liquidity: priceData.liquidity,
-          
-          holderCount: 0,
-          transactionCount24h: 0
+          logoUri: dexData.logoUri || null
         };
       }
       
       return null;
+    } catch (error) {
+      logger.error(`Failed to get basic info for ${mintAddress}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * 获取代币完整信息（整合所有数据）
+   * 使用 Birdeye (免费API) + DexScreener (补充)
+   */
+  async getTokenFullInfo(mintAddress: string) {
+    try {
+      // 检查缓存
+      const cacheKey = `full_${mintAddress}`;
+      const cachedData = this.getCachedData(cacheKey);
+      if (cachedData) {
+        logger.info(`📦 Using cached data for ${mintAddress}`);
+        return cachedData;
+      }
+
+      logger.info(`Fetching full info for ${mintAddress}...`);
+      
+      // 方案1: 先尝试 Birdeye token_overview
+      try {
+        const overview = await this.request('/defi/token_overview', {
+          address: mintAddress
+        });
+        
+        if (overview?.success && overview.data) {
+          const data = overview.data;
+          logger.info(`✅ Got full data from Birdeye token_overview`);
+          
+          const result = {
+            mintAddress,
+            name: data.name || 'Unknown',
+            symbol: data.symbol || '???',
+            decimals: data.decimals || 9,
+            logoUri: data.logoURI || data.logo || null,
+            supply: data.supply || data.realSupply || 0,
+            
+            price: data.price || 0,
+            priceChange24h: data.priceChange24h || 0,
+            marketCap: data.mc || 0,
+            volume24h: data.v24hUSD || 0,
+            fdv: data.fdv || 0,
+            liquidity: data.liquidity || 0,
+            
+            holderCount: data.holder || 0,
+            transactionCount24h: data.trade24h || 0
+          };
+          
+          // 缓存结果
+          this.setCachedData(cacheKey, result);
+          return result;
+        }
+      } catch (error: any) {
+        if (error.response?.status === 401) {
+          logger.warn('Birdeye token_overview requires paid plan, using fallback');
+        }
+      }
+      
+      // 方案2: 使用 Birdeye price (免费) + DexScreener (补充)
+      logger.info('Using Birdeye price + DexScreener...');
+      
+      const [priceData, dexData] = await Promise.all([
+        this.getTokenPrice(mintAddress),
+        this.getDexScreenerData(mintAddress)
+      ]);
+      
+      const result = {
+        mintAddress,
+        
+        // 从 DexScreener 获取基础信息
+        name: dexData?.name || 'Unknown',
+        symbol: dexData?.symbol || '???',
+        decimals: 9,
+        logoUri: dexData?.logoUri || null,
+        supply: 0,
+        
+        // 从 Birdeye 获取价格（更准确）
+        price: priceData?.price || dexData?.price || 0,
+        priceChange24h: priceData?.priceChange24h || dexData?.priceChange24h || 0,
+        
+        // 从 DexScreener 获取市场数据
+        marketCap: dexData?.marketCap || 0,
+        volume24h: dexData?.volume24h || 0,
+        fdv: dexData?.fdv || 0,
+        
+        // 流动性优先用 Birdeye
+        liquidity: priceData?.liquidity || dexData?.liquidity || 0,
+        
+        // DexScreener 不提供这些数据
+        holderCount: 0,
+        transactionCount24h: 0
+      };
+      
+      // 缓存结果
+      this.setCachedData(cacheKey, result);
+      return result;
       
     } catch (error) {
-      logger.error(`Failed to get full info from Birdeye for ${mintAddress}:`, error);
+      logger.error(`Failed to get full info for ${mintAddress}:`, error);
+      return null;
+    }
+  }
+  
+  /**
+   * 从 DexScreener 获取代币数据（补充）
+   */
+  private async getDexScreenerData(mintAddress: string) {
+    try {
+      const response = await axios.get(
+        `https://api.dexscreener.com/latest/dex/tokens/${mintAddress}`
+      );
+      
+      const pairs = response.data?.pairs || [];
+      if (pairs.length === 0) return null;
+      
+      // 使用流动性最高的交易对
+      const mainPair = pairs.sort((a: any, b: any) => 
+        (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0)
+      )[0];
+      
+      return {
+        name: mainPair.baseToken?.name,
+        symbol: mainPair.baseToken?.symbol,
+        logoUri: mainPair.info?.imageUrl,
+        price: mainPair.priceUsd ? parseFloat(mainPair.priceUsd) : 0,
+        marketCap: mainPair.marketCap || 0,
+        liquidity: mainPair.liquidity?.usd || 0,
+        volume24h: mainPair.volume?.h24 || 0,
+        priceChange24h: mainPair.priceChange?.h24 || 0,
+        fdv: mainPair.fdv || 0
+      };
+    } catch (error) {
+      logger.error('DexScreener fallback failed:', error);
       return null;
     }
   }

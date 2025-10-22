@@ -38,8 +38,8 @@ function scheduleJobs() {
     }
   });
   
-  // 更新活跃代币数据 - 每2分钟（使用 Birdeye）
-  cron.schedule('*/2 * * * *', async () => {
+  // 更新活跃代币数据 - 每10秒（使用 Birdeye）
+  cron.schedule('*/10 * * * * *', async () => {
     logger.info('📊 Running market data update job');
     try {
       await updateActiveTokensData();
@@ -55,52 +55,77 @@ function scheduleJobs() {
  * 更新活跃代币的市场数据
  */
 async function updateActiveTokensData() {
-  const { prisma } = await import('../lib/prisma');
+  const { prisma } = await import('../lib/database');
   
-  // 获取最近24小时的活跃代币
-  const activeMatches = await prisma.topicTokenMatch.findMany({
-    where: {
-      matchedAt: {
-        gte: new Date(Date.now() - 24 * 60 * 60 * 1000)
-      }
-    },
-    include: { token: true },
-    orderBy: { matchedAt: 'desc' },
-    take: 20  // 限制数量
-  });
-  
-  for (const match of activeMatches) {
-    try {
-      // 使用 Birdeye 获取完整信息
-      const fullInfo = await birdeyeService.getTokenFullInfo(match.token.mintAddress);
-      
-      if (!fullInfo) continue;
-      
-      // 更新市场数据
-      await prisma.tokenMarketData.create({
-        data: {
-          tokenId: match.token.id,
-          price: fullInfo.price,
-          marketCap: fullInfo.marketCap,
-          liquidityUsd: fullInfo.liquidity,
-          volume24h: fullInfo.volume24h,
-          priceChange24h: fullInfo.priceChange24h,
-          holderCount: fullInfo.holderCount,
-          transactionCount24h: fullInfo.transactionCount24h,
-          fdv: fullInfo.fdv
+  try {
+    // 获取所有有代币的主题（限制数量避免API过载）
+    const topicsWithTokens = await prisma.topic.findMany({
+      where: {
+        tokens: {
+          some: {}
         }
-      });
-      
-      logger.info(
-        `Updated ${match.token.symbol}: $${fullInfo.price}, MC: $${fullInfo.marketCap}, holders: ${fullInfo.holderCount}`
-      );
-      
-      // 限流：Birdeye 免费版有限制
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-    } catch (error) {
-      logger.error(`Failed to update ${match.token.symbol}:`, error);
+      },
+      include: {
+        tokens: {
+          include: {
+            token: true
+          },
+          take: 3, // 每个主题最多3个代币
+          orderBy: {
+            addedAt: 'desc'
+          }
+        }
+      },
+      take: 5 // 最多5个主题
+    });
+    
+    const tokensToUpdate = [];
+    for (const topic of topicsWithTokens) {
+      for (const topicToken of topic.tokens) {
+        tokensToUpdate.push(topicToken.token);
+      }
     }
+    
+    // 去重
+    const uniqueTokens = tokensToUpdate.filter((token, index, self) => 
+      index === self.findIndex(t => t.id === token.id)
+    );
+    
+    logger.info(`📊 Updating ${uniqueTokens.length} tokens...`);
+    
+    for (const token of uniqueTokens) {
+      try {
+        // 使用 Birdeye 获取完整信息
+        const fullInfo = await birdeyeService.getTokenFullInfo(token.mintAddress);
+        
+        if (!fullInfo) continue;
+        
+        // 更新市场数据
+        await prisma.tokenMarketData.create({
+          data: {
+            tokenId: token.id,
+            price: fullInfo.price,
+            priceChange24h: fullInfo.priceChange24h,
+            marketCap: fullInfo.marketCap,
+            volume24h: fullInfo.volume24h,
+            liquidity: fullInfo.liquidity,
+            holderCount: fullInfo.holderCount || 0,
+            transactionCount24h: fullInfo.transactionCount24h || 0,
+            fdv: fullInfo.fdv
+          }
+        });
+        
+        logger.info(`✅ Updated ${token.symbol}: $${fullInfo.price?.toFixed(6)} (${fullInfo.priceChange24h?.toFixed(2)}%)`);
+        
+        // 限流：避免API过载
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
+      } catch (error) {
+        logger.error(`❌ Failed to update ${token.symbol}:`, error);
+      }
+    }
+  } catch (error) {
+    logger.error('Failed to update active tokens data:', error);
   }
 }
 

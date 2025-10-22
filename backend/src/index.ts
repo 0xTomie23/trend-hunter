@@ -4,10 +4,11 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import dotenv from 'dotenv';
 import { logger } from './utils/logger';
-import { prisma } from './lib/prisma';
+import { connectDatabase, disconnectDatabase } from './lib/database';
 import { initializeServices } from './services';
 import apiRoutes from './routes';
 import triggerRoutes from './routes/manual-trigger';
+import demoRoutes from './routes/demo';
 
 dotenv.config();
 
@@ -34,6 +35,7 @@ app.use((req, res, next) => {
 // Routes
 app.use('/api', apiRoutes);
 app.use('/api/trigger', triggerRoutes);
+app.use('/api/demo', demoRoutes);  // 演示路由（无需数据库）
 
 // Health check
 app.get('/health', (req, res) => {
@@ -75,16 +77,26 @@ const PORT = process.env.PORT || 3000;
 
 async function start() {
   try {
-    // Test database connection
-    await prisma.$connect();
-    logger.info('Database connected');
+    // 连接数据库
+    try {
+      await connectDatabase();
+      logger.info('✅ Database connected successfully');
+    } catch (dbError) {
+      logger.warn('⚠️ Database connection failed, running in demo mode');
+    }
     
-    // Initialize services
-    await initializeServices();
+    // Initialize services (即使数据库失败也继续)
+    try {
+      await initializeServices();
+    } catch (serviceError) {
+      logger.warn('Services initialization failed, some features may be limited');
+    }
     
     httpServer.listen(PORT, () => {
-      logger.info(`Server running on port ${PORT}`);
+      logger.info(`🚀 Server running on port ${PORT}`);
       logger.info(`Environment: ${process.env.NODE_ENV}`);
+      logger.info(`📊 Database API available at: http://localhost:${PORT}/api`);
+      logger.info(`🎮 Demo API available at: http://localhost:${PORT}/api/demo`);
     });
   } catch (error) {
     logger.error('Failed to start server:', error);
@@ -95,13 +107,13 @@ async function start() {
 // Graceful shutdown
 process.on('SIGINT', async () => {
   logger.info('SIGINT received, shutting down gracefully');
-  await prisma.$disconnect();
+  await disconnectDatabase();
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
   logger.info('SIGTERM received, shutting down gracefully');
-  await prisma.$disconnect();
+  await disconnectDatabase();
   process.exit(0);
 });
 
