@@ -254,8 +254,8 @@ export class BirdeyeService {
       
       return result;
       
-    } catch (error) {
-      logger.error('Failed to get recent tokens from Birdeye:', error);
+    } catch (error: any) {
+      logger.error(`Failed to get recent tokens from Birdeye: ${error.message || error}`);
       return [];
     }
   }

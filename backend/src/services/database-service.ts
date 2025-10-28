@@ -30,7 +30,7 @@ export class UserService {
   // 获取用户信息
   async getUser(walletAddress: string) {
     try {
-      return await this.prisma.user.findUnique({
+      const user = await this.prisma.user.findUnique({
         where: { walletAddress },
         include: {
           topics: {
@@ -41,7 +41,7 @@ export class UserService {
                     include: {
                       marketData: {
                         orderBy: { timestamp: 'desc' },
-                        take: 1
+                        take: 1  // 只返回最新的一条记录
                       }
                     }
                   }
@@ -52,6 +52,8 @@ export class UserService {
           }
         }
       });
+
+      return user;
     } catch (error) {
       logger.error('Failed to get user:', error);
       throw error;
@@ -270,6 +272,23 @@ export class TokenService {
       return true;
     } catch (error) {
       logger.error('Failed to remove token from topic:', error);
+      throw error;
+    }
+  }
+
+  // 通过 topicTokenId 删除代币
+  async removeTokenFromTopicById(topicTokenId: number) {
+    try {
+      await this.prisma.topicToken.delete({
+        where: {
+          id: topicTokenId
+        }
+      });
+
+      logger.info(`TopicToken ${topicTokenId} deleted successfully`);
+      return true;
+    } catch (error) {
+      logger.error('Failed to remove token from topic by ID:', error);
       throw error;
     }
   }

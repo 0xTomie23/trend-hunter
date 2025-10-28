@@ -25,13 +25,13 @@ model User {
 }
 
 // ============================================
-// 主题管理（用户手动创建）
+// 主题管理（用户手动创建 + 自动生成）
 // ============================================
 model Topic {
   id              Int       @id @default(autoincrement())
   name            String
   description     String?
-  userId          Int       @map("user_id")
+  userId          Int        @map("user_id")  // 兼容现有数据库
   order           Int        @default(0)  // 排序顺序
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
@@ -43,6 +43,26 @@ model Topic {
   @@index([userId])
   @@index([order])
   @@map("topics")
+}
+
+
+// ============================================
+// 主题-代币关联表
+// ============================================
+model TopicToken {
+  id              Int       @id @default(autoincrement())
+  topicId         Int       @map("topic_id")
+  tokenId         Int       @map("token_id")
+  addedAt         DateTime  @default(now()) @map("added_at")
+  
+  // 关联
+  topic           Topic     @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  token           Token     @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+  
+  @@unique([topicId, tokenId])
+  @@index([topicId])
+  @@index([tokenId])
+  @@map("topic_tokens")
 }
 
 // ============================================
@@ -66,25 +86,6 @@ model Token {
   @@index([mintAddress])
   @@index([symbol])
   @@map("tokens")
-}
-
-// ============================================
-// 主题-代币关联表
-// ============================================
-model TopicToken {
-  id              Int       @id @default(autoincrement())
-  topicId         Int       @map("topic_id")
-  tokenId         Int       @map("token_id")
-  addedAt         DateTime  @default(now()) @map("added_at")
-  
-  // 关联
-  topic           Topic     @relation(fields: [topicId], references: [id], onDelete: Cascade)
-  token           Token     @relation(fields: [tokenId], references: [id], onDelete: Cascade)
-  
-  @@unique([topicId, tokenId])
-  @@index([topicId])
-  @@index([tokenId])
-  @@map("topic_tokens")
 }
 
 // ============================================

@@ -33,8 +33,9 @@ lerna-debug.log*
 *.swo
 *~
 
-# Database
+# Database (允许 dev.db 用于演示)
 *.db
+!backend/prisma/dev.db
 *.sqlite
 *.sqlite3
 

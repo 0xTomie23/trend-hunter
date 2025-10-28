@@ -8,7 +8,8 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "migrate": "prisma migrate dev",
-    "generate": "prisma generate"
+    "generate": "prisma generate",
+    "test:clustering": "tsx src/scripts/test-clustering-integration.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.7.1",

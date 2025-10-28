@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { UserService, TopicService, TokenService } from '../services/database-service';
-import { birdeyeService } from '../services';
+import { birdeyeService, multiApiService } from '../services';
 import { logger } from '../utils/logger';
 
 const router = Router();
@@ -63,6 +63,72 @@ router.get('/:walletAddress', async (req, res) => {
 // ============================================
 // 主题相关 API
 // ============================================
+
+/**
+ * GET /api/topics/system
+ * 获取系统自动创建的主题
+ */
+router.get('/topics/system', async (req, res) => {
+  try {
+    const { prisma } = await import('../lib/database');
+    
+    // 查找 System 用户
+    const systemUser = await prisma.user.findFirst({
+      where: { walletAddress: 'system' }
+    });
+    
+    if (!systemUser) {
+      return res.json({
+        success: true,
+        data: []
+      });
+    }
+    
+    // 获取系统用户的所有主题
+    const systemTopics = await prisma.topic.findMany({
+      where: {
+        userId: systemUser.id
+      },
+      include: {
+        tokens: {
+          include: {
+            token: {
+              include: {
+                marketData: {
+                  where: {
+                    OR: [
+                      { price: { gt: 0 } },
+                      { marketCap: { gt: 0 } },
+                      { liquidity: { gt: 0 } },
+                    ],
+                  },
+                  orderBy: { timestamp: 'desc' },
+                  take: 1,
+                },
+              },
+            },
+          },
+          orderBy: {
+            addedAt: 'desc',
+          },
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+    
+    logger.info(`📊 Returning ${systemTopics.length} system topics`);
+    
+    res.json({
+      success: true,
+      data: systemTopics
+    });
+  } catch (error) {
+    logger.error('Get system topics failed:', error);
+    res.status(500).json({ success: false, error: 'Failed to get system topics' });
+  }
+});
 
 /**
  * POST /api/topics
@@ -177,7 +243,7 @@ router.post('/tokens/add', async (req, res) => {
     }
 
     // 第一步：快速获取基本信息（名字、符号、图片）
-    const basicInfo = await birdeyeService.getTokenBasicInfo(mintAddress);
+    const basicInfo = await multiApiService.getTokenBasicInfo(mintAddress);
     
     if (!basicInfo) {
       return res.status(404).json({ error: 'Token not found' });
@@ -186,8 +252,8 @@ router.post('/tokens/add', async (req, res) => {
     // 立即创建或获取代币（只有基本信息）
     const token = await tokenService.createOrGetToken({
       mintAddress,
-      name: basicInfo.name,
-      symbol: basicInfo.symbol,
+      name: basicInfo.name.trim().replace(/\s+/g, ' '), // 去除首尾空格，多个空格合并为一个
+      symbol: basicInfo.symbol.trim().replace(/\s+/g, ''), // 去除所有空格
       decimals: basicInfo.decimals || 9,
       logoUri: basicInfo.logoUri
     });
@@ -200,15 +266,15 @@ router.post('/tokens/add', async (req, res) => {
     setImmediate(async () => {
       try {
         logger.info(`📊 Fetching market data for ${token.symbol} in background...`);
-        const fullInfo = await birdeyeService.getTokenFullInfo(mintAddress);
+        const fullInfo = await multiApiService.getTokenFullInfo(mintAddress);
         
         if (fullInfo && (fullInfo.price || fullInfo.marketCap || fullInfo.volume24h)) {
           // 更新代币信息（可能包含更完整的logoUri）
           if (fullInfo.logoUri && !token.logoUri) {
             await tokenService.createOrGetToken({
               mintAddress,
-              name: fullInfo.name,
-              symbol: fullInfo.symbol,
+              name: fullInfo.name.trim().replace(/\s+/g, ' '), // 去除首尾空格，多个空格合并为一个
+              symbol: fullInfo.symbol.trim().replace(/\s+/g, ''), // 去除所有空格
               decimals: fullInfo.decimals,
               logoUri: fullInfo.logoUri
             });
@@ -226,7 +292,7 @@ router.post('/tokens/add', async (req, res) => {
             fdv: fullInfo.fdv
           });
           
-          logger.info(`✅ Market data updated for ${token.symbol}`);
+          logger.info(`✅ Market data updated for ${token.symbol} via ${fullInfo.source}`);
         }
       } catch (error) {
         logger.error(`Failed to update market data for ${token.symbol}:`, error);
@@ -244,14 +310,15 @@ router.post('/tokens/add', async (req, res) => {
 });
 
 /**
- * DELETE /api/tokens/:topicId/:tokenId
+ * DELETE /api/tokens/:topicTokenId
  * 从主题中移除代币
  */
-router.delete('/tokens/:topicId/:tokenId', async (req, res) => {
+router.delete('/tokens/:topicTokenId', async (req, res) => {
   try {
-    const { topicId, tokenId } = req.params;
+    const { topicTokenId } = req.params;
     
-    await tokenService.removeTokenFromTopic(parseInt(topicId), parseInt(tokenId));
+    // 查找并删除 topicToken 记录
+    await tokenService.removeTokenFromTopicById(parseInt(topicTokenId));
     
     res.json({
       success: true,

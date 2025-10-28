@@ -2,17 +2,172 @@ import { Router } from 'express';
 import { prisma } from '../lib/prisma';
 import { birdeyeService } from '../services';
 import userRoutes from './user';
+import clusteringRoutes from './clustering';
+import newTokensRoutes from './new-tokens';
+import { logger } from '../utils/logger';
 
 const router = Router();
 
 // 挂载用户相关路由
 router.use('/', userRoutes);
 
+// 挂载聚类相关路由
+router.use('/clustering', clusteringRoutes);
+
+// 挂载新代币相关路由
+router.use('/new-tokens', newTokensRoutes);
+
+/**
+ * GET /api/topics/auto
+ * Get list of auto-generated topics
+ */
+router.get('/topics/auto', async (req, res) => {
+  try {
+    const { 
+      page = '1', 
+      limit = '20',
+    } = req.query;
+    
+    const pageNum = parseInt(page as string);
+    const limitNum = parseInt(limit as string);
+    const skip = (pageNum - 1) * limitNum;
+    
+    // 获取自动生成的主题
+    // 获取系统用户的所有主题（自动创建的主题）
+    const systemUser = await prisma.user.findFirst({
+      where: { walletAddress: 'system' },
+    });
+    
+    const topics = await prisma.topic.findMany({
+      where: systemUser ? {
+        userId: systemUser.id,
+      } : undefined,
+      include: {
+        tokens: {
+          include: {
+            token: {
+              include: {
+                marketData: {
+                  where: {
+                    OR: [
+                      { price: { gt: 0 } },
+                      { marketCap: { gt: 0 } },
+                      { liquidity: { gt: 0 } },
+                    ],
+                  },
+                  orderBy: { timestamp: 'desc' },
+                  take: 1,
+                },
+              },
+            },
+          },
+          orderBy: {
+            addedAt: 'desc',
+          },
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      skip,
+      take: limitNum,
+    });
+    
+    const total = await prisma.topic.count({
+      where: systemUser ? {
+        userId: systemUser.id,
+      } : undefined,
+    });
+    
+    // 为每个代币添加最新的市场数据
+    const topicsWithLatestData = topics.map(topic => ({
+      ...topic,
+      tokens: topic.tokens.map(tt => ({
+        ...tt,
+        token: {
+          ...tt.token,
+          latestMarketData: tt.token.marketData[0] || null,
+        },
+      })),
+    }));
+    
+    res.json({
+      success: true,
+      data: topicsWithLatestData,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        pages: Math.ceil(total / limitNum),
+      },
+    });
+  } catch (error) {
+    logger.error('Error fetching auto topics:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch auto topics' });
+  }
+});
+
+/**
+ * GET /api/topics/auto/:id
+ * Get auto topic details
+ */
+router.get('/topics/auto/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const topic = await prisma.topic.findUnique({
+      where: { id: parseInt(id) },
+      include: {
+        tokens: {
+          include: {
+            token: {
+              include: {
+                marketData: {
+                  where: {
+                    OR: [
+                      { price: { gt: 0 } },
+                      { marketCap: { gt: 0 } },
+                      { liquidity: { gt: 0 } },
+                    ],
+                  },
+                  orderBy: { timestamp: 'desc' },
+                  take: 100,
+                },
+              },
+            },
+          },
+          orderBy: {
+            addedAt: 'desc',
+          },
+        },
+      },
+    });
+    
+    if (!topic) {
+      return res.status(404).json({ success: false, error: 'Topic not found' });
+    }
+    
+    res.json({
+      success: true,
+      data: topic,
+    });
+  } catch (error) {
+    logger.error('Error fetching topic:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch topic' });
+  }
+});
+
 /**
  * GET /api/hot-topics
  * Get list of hot topics
+ * TEMPORARILY DISABLED - hotTopic model removed from schema
  */
 router.get('/hot-topics', async (req, res) => {
+  res.json({ success: true, data: [], pagination: { page: 1, limit: 20, total: 0, pages: 0 } });
+});
+
+// DISABLED - Original hot-topics route
+router.get('/hot-topics-disabled', async (req, res) => {
   try {
     const { 
       page = '1', 
@@ -55,6 +210,13 @@ router.get('/hot-topics', async (req, res) => {
             token: {
               include: {
                 marketData: {
+                  where: {
+                    OR: [
+                      { price: { gt: 0 } },
+                      { marketCap: { gt: 0 } },
+                      { liquidity: { gt: 0 } },
+                    ],
+                  },
                   orderBy: { timestamp: 'desc' },
                   take: 1
                 }
@@ -113,8 +275,14 @@ router.get('/hot-topics', async (req, res) => {
 /**
  * GET /api/hot-topics/:id
  * Get hot topic details
+ * TEMPORARILY DISABLED - hotTopic model removed from schema
  */
 router.get('/hot-topics/:id', async (req, res) => {
+  res.status(404).json({ success: false, error: 'Hot topics feature temporarily disabled' });
+});
+
+// DISABLED - Original hot-topics/:id route
+router.get('/hot-topics-disabled/:id', async (req, res) => {
   try {
     const { id } = req.params;
     

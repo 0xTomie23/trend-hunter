@@ -26,7 +26,9 @@ import {
   CardContent,
   Fade,
   Slide,
-  Zoom
+  Zoom,
+  Snackbar,
+  Alert
 } from '@mui/material'
 import FlashOnIcon from '@mui/icons-material/FlashOn'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
@@ -36,14 +38,17 @@ import SettingsIcon from '@mui/icons-material/Settings'
 import AddIcon from '@mui/icons-material/Add'
 import CloseIcon from '@mui/icons-material/Close'
 import DeleteIcon from '@mui/icons-material/Delete'
+import RemoveCircleIcon from '@mui/icons-material/RemoveCircle'
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
-import { Connection, clusterApiUrl, PublicKey } from '@solana/web3.js'
+import { useWallet, useConnection } from '@solana/wallet-adapter-react'
+import { WalletMultiButton } from '@solana/wallet-adapter-react-ui'
 import './App.css'
 import CryptoTable from './components/CryptoTable'
 import PixelReaper from './components/PixelReaper'
 import PixelFrog from './components/PixelFrog'
 import DemoTokenView from './components/DemoTokenView'
+import BuyModal from './components/BuyModal'
 
 // 创建暗色主题
 const darkTheme = createTheme({
@@ -67,39 +72,48 @@ const darkTheme = createTheme({
   typography: {
     fontFamily: "'Press Start 2P', 'Silkscreen', 'Zpix', 'Fusion Pixel', monospace",
     h1: {
-      fontSize: '2rem',
+      fontSize: 'clamp(1.5rem, 4vw, 2rem)',
       fontWeight: 'bold',
     },
     h2: {
-      fontSize: '1.5rem',
+      fontSize: 'clamp(1.25rem, 3.5vw, 1.5rem)',
       fontWeight: 'bold',
     },
     h3: {
-      fontSize: '1.25rem',
+      fontSize: 'clamp(1.125rem, 3vw, 1.25rem)',
       fontWeight: 'bold',
     },
     h4: {
-      fontSize: '1.125rem',
+      fontSize: 'clamp(1rem, 2.5vw, 1.125rem)',
       fontWeight: 'bold',
     },
     h5: {
-      fontSize: '1rem',
+      fontSize: 'clamp(0.875rem, 2vw, 1rem)',
       fontWeight: 'bold',
     },
     h6: {
-      fontSize: '0.875rem',
+      fontSize: 'clamp(0.75rem, 1.8vw, 0.875rem)',
       fontWeight: 'bold',
     },
     body1: {
-      fontSize: '0.875rem',
+      fontSize: 'clamp(0.75rem, 1.5vw, 0.875rem)',
     },
     body2: {
-      fontSize: '0.75rem',
+      fontSize: 'clamp(0.625rem, 1.3vw, 0.75rem)',
     },
     button: {
-      fontSize: '0.75rem',
+      fontSize: 'clamp(0.625rem, 1.3vw, 0.75rem)',
       fontWeight: 'bold',
       textTransform: 'none',
+    },
+  },
+  breakpoints: {
+    values: {
+      xs: 0,
+      sm: 600,
+      md: 960,
+      lg: 1280,
+      xl: 1920,
     },
   },
   components: {
@@ -133,14 +147,22 @@ const darkTheme = createTheme({
 })
 
 function App() {
-  const [walletAddress, setWalletAddress] = React.useState(null)
+  // 使用钱包适配器的 hooks
+  const { publicKey, disconnect } = useWallet()
+  const { connection } = useConnection()
+  
   const [walletMenuAnchor, setWalletMenuAnchor] = React.useState(null)
   const [solBalance, setSolBalance] = React.useState(null)
   const [currentTopic, setCurrentTopic] = React.useState(0)
   const [settingsOpen, setSettingsOpen] = React.useState(false)
   const [addTokenOpen, setAddTokenOpen] = React.useState(false)
+  const [deleteTokenOpen, setDeleteTokenOpen] = React.useState(false)
+  const [selectedTopicForDelete, setSelectedTopicForDelete] = React.useState(null)
   const [newTokenAddress, setNewTokenAddress] = React.useState('')
   const [newTopicName, setNewTopicName] = React.useState('')
+  const [buyModalOpen, setBuyModalOpen] = React.useState(false)
+  const [selectedTokenForBuy, setSelectedTokenForBuy] = React.useState(null)
+  const [copySnackbarOpen, setCopySnackbarOpen] = React.useState(false)
   
   // 数据库状态
   const [user, setUser] = React.useState(null)
@@ -149,8 +171,9 @@ function App() {
   
   const [sortField, setSortField] = React.useState('marketCap')
   const [sortDirection, setSortDirection] = React.useState('desc')
-
-  const connectionRef = React.useRef(null)
+  
+  // 计算钱包地址字符串
+  const walletAddress = React.useMemo(() => publicKey?.toBase58() || null, [publicKey])
 
   // 数字滚动动画组件 - 只在数值真正变化时显示动画
   const AnimatedNumber = ({ value, format, color = '#ffffff' }) => {
@@ -238,7 +261,20 @@ function App() {
       
       if (result.success) {
         setUser(result.data);
-        setTopics(result.data.topics || []);
+        
+        // 同时获取系统自动创建的主题
+        const userTopics = result.data.topics || [];
+        const systemTopics = await fetchSystemTopics();
+        
+        // 合并用户主题和系统主题，并标记来源
+        const allTopics = [
+          ...userTopics.map(t => ({ ...t, source: 'user' })),
+          ...systemTopics.map(t => ({ ...t, source: 'system' }))
+        ];
+        
+        console.log(`📊 Total topics: ${allTopics.length} (${userTopics.length} user + ${systemTopics.length} system)`);
+        
+        setTopics(allTopics);
         // 不再触发全局动画，让每个组件自己判断是否需要动画
         return result.data;
       }
@@ -246,6 +282,30 @@ function App() {
     } catch (error) {
       console.error('Failed to fetch user data:', error);
       throw error;
+    }
+  };
+
+  // 获取系统自动创建的主题
+  const fetchSystemTopics = async () => {
+    try {
+      const response = await fetch('http://localhost:3000/api/topics/system', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (!response.ok) {
+        console.warn('Failed to fetch system topics:', response.status);
+        return [];
+      }
+      
+      const result = await response.json();
+      console.log('🤖 System topics:', result.data?.length || 0);
+      return result.data || [];
+    } catch (error) {
+      console.error('Failed to fetch system topics:', error);
+      return [];
     }
   };
 
@@ -333,27 +393,28 @@ function App() {
     }
   };
 
-  const getProvider = () => {
-    if ('solana' in window) {
-      const provider = window.solana
-      if (provider.isPhantom) {
-        return provider
-      }
-    }
-    window.open('https://phantom.app/', '_blank')
-  }
-
-  const ensureConnection = async () => {
-    if (!connectionRef.current) {
-      connectionRef.current = new Connection(clusterApiUrl('mainnet-beta'), 'confirmed')
-    }
-    return connectionRef.current
-  }
-
-  const fetchBalance = async (address) => {
+  // 从主题删除代币
+  const removeTokenFromTopic = async (topicTokenId) => {
     try {
-      const connection = await ensureConnection()
-      const publicKey = new PublicKey(address)
+      const result = await apiCall(`/tokens/${topicTokenId}`, {
+        method: 'DELETE'
+      });
+      
+      if (result.success) {
+        return true;
+      }
+      throw new Error('Failed to remove token');
+    } catch (error) {
+      console.error('Failed to remove token:', error);
+      throw error;
+    }
+  };
+
+  // 获取 SOL 余额
+  const fetchBalance = async () => {
+    if (!publicKey || !connection) return
+    
+    try {
       const balance = await connection.getBalance(publicKey)
       setSolBalance(balance / 1e9)
     } catch (error) {
@@ -361,45 +422,10 @@ function App() {
     }
   }
 
-  const handlePhantomLogin = async () => {
-    try {
-      const provider = getProvider()
-      if (!provider) return
-
-      const response = await provider.connect()
-      const address = response.publicKey.toString()
-      setWalletAddress(address)
-      
-      // 保存钱包地址到 localStorage
-      localStorage.setItem('walletAddress', address)
-      
-      await fetchBalance(address)
-      
-      // 登录到数据库
-      try {
-        await loginUser(address);
-        console.log('✅ User logged in successfully');
-      } catch (dbError) {
-        console.warn('⚠️ Database login failed, using demo mode:', dbError);
-        // 如果数据库登录失败，使用默认主题
-        setTopics([
-          { id: 0, name: 'AI梗', tokens: [] },
-          { id: 1, name: '狗狗系', tokens: [] },
-          { id: 2, name: '索拉拉', tokens: [] }
-        ]);
-      }
-    } catch (error) {
-      console.error('Failed to connect:', error)
-    }
-  }
-
+  // 处理断开连接
   const handleDisconnect = async () => {
     try {
-      const provider = getProvider()
-      if (provider && provider.disconnect) {
-        await provider.disconnect()
-      }
-      setWalletAddress(null)
+      await disconnect()
       setSolBalance(null)
       setWalletMenuAnchor(null)
       
@@ -438,52 +464,50 @@ function App() {
     setWalletMenuAnchor(null)
   }
 
+  // 钱包连接时获取余额和登录
   React.useEffect(() => {
-    const handleAccountChanged = (publicKey) => {
-      if (publicKey) {
-        setWalletAddress(publicKey.toString())
-        fetchBalance(publicKey.toString())
-      } else {
-        setWalletAddress(null)
-        setSolBalance(null)
-      }
+    if (publicKey && connection) {
+      fetchBalance()
+      
+      const address = publicKey.toBase58()
+      // 保存钱包地址到 localStorage
+      localStorage.setItem('walletAddress', address)
+      
+      // 登录到数据库
+      loginUser(address).then(() => {
+        console.log('✅ User logged in successfully')
+      }).catch((dbError) => {
+        console.warn('⚠️ Database login failed, using demo mode:', dbError)
+        // 如果数据库登录失败，使用默认主题
+        setTopics([
+          { id: 1, name: 'AI梗', tokens: [] },
+          { id: 2, name: '狗狗系', tokens: [] },
+          { id: 3, name: '索拉拉', tokens: [] }
+        ])
+      })
     }
+  }, [publicKey, connection])
 
-    const provider = getProvider()
-    if (provider && provider.on) {
-      provider.on('accountChanged', handleAccountChanged)
-    }
-
-    return () => {
-      if (provider && provider.off) {
-        provider.off('accountChanged', handleAccountChanged)
-      }
-    }
-  }, [])
-
-  // 页面加载时自动恢复用户状态和代币数据
+  // 页面加载时自动恢复用户数据
   React.useEffect(() => {
     const restoreUserSession = async () => {
       try {
-        // 检查是否有保存的钱包地址
         const savedWalletAddress = localStorage.getItem('walletAddress')
-        if (savedWalletAddress) {
-          setWalletAddress(savedWalletAddress)
-          await fetchBalance(savedWalletAddress)
-          
+        if (savedWalletAddress && publicKey && publicKey.toBase58() === savedWalletAddress) {
           // 自动登录用户并获取数据
           await loginUser(savedWalletAddress)
           await fetchUserData(savedWalletAddress)
         }
       } catch (error) {
         console.error('Failed to restore user session:', error)
-        // 清除可能损坏的数据
         localStorage.removeItem('walletAddress')
       }
     }
 
-    restoreUserSession()
-  }, [])
+    if (publicKey) {
+      restoreUserSession()
+    }
+  }, [publicKey])
 
   // 当主题列表变化时，确保 currentTopic 有效
   React.useEffect(() => {
@@ -695,6 +719,12 @@ function App() {
     return sign + percentage.toFixed(1) + '%'
   }
 
+  // 格式化合约地址（显示前4位和后4位）
+  const formatContractAddress = (address) => {
+    if (!address || address.length < 8) return address
+    return `${address.slice(0, 4)}...${address.slice(-4)}`
+  }
+
   const getSortedTokens = () => {
     const currentTopicData = topics.find(topic => topic.id === currentTopic)
     if (!currentTopicData || !currentTopicData.tokens) return []
@@ -825,28 +855,23 @@ function App() {
                   <ExpandMoreIcon fontSize="small" />
                 </IconButton>
                 <Menu anchorEl={walletMenuAnchor} open={Boolean(walletMenuAnchor)} onClose={closeMenu} keepMounted>
-                    <MenuItem onClick={() => fetchBalance(walletAddress)}>Refresh Balance</MenuItem>
+                    <MenuItem onClick={fetchBalance}>Refresh Balance</MenuItem>
                     <MenuItem onClick={handleDisconnect}>Disconnect</MenuItem>
                 </Menu>
               </Box>
             ) : (
-              <Button 
-                size="small"
-                startIcon={<FlashOnIcon sx={{ fontSize: 16 }} />}
-                onClick={handlePhantomLogin}
-                sx={{
+              <WalletMultiButton 
+                style={{
                   fontFamily: "'Silkscreen','Press Start 2P', monospace",
-                  fontSize: 12,
-                  bgcolor: '#0d1e12',
+                  fontSize: '12px',
+                  backgroundColor: '#0d1e12',
                   border: '1px solid #3ddc84',
                   color: '#3ddc84',
                   borderRadius: '10px',
-                  textTransform: 'none',
-                  '&:hover': { bgcolor: '#0f2617', borderColor: '#46f092' }
+                  height: '36px',
+                  padding: '0 16px'
                 }}
-              >
-                  LOGIN
-              </Button>
+              />
             )}
             </Box>
           </Toolbar>
@@ -887,7 +912,24 @@ function App() {
                   key={topic.id}
                   value={topic.id}
                   icon={<TrendingUpIcon sx={{ fontSize: '18px' }} />} 
-                  label={topic.name} 
+                  label={
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                      <span>{topic.name}</span>
+                      {topic.source === 'system' && (
+                        <Chip 
+                          label="🤖" 
+                          size="small" 
+                          sx={{ 
+                            height: '16px', 
+                            fontSize: '10px', 
+                            bgcolor: 'rgba(61, 220, 132, 0.2)',
+                            color: '#3ddc84',
+                            fontFamily: "'Press Start 2P', monospace"
+                          }} 
+                        />
+                      )}
+                    </Box>
+                  }
                   iconPosition="start"
                 />
               ))}
@@ -926,7 +968,7 @@ function App() {
                   </Box>
                   <Box 
                     sx={{ 
-                      width: '140px', 
+                      width: { xs: '80px', sm: '100px', md: '120px', lg: '140px' }, 
                       textAlign: 'right', 
                       cursor: 'pointer', 
                       pr: 2,
@@ -954,7 +996,7 @@ function App() {
                   </Box>
                   <Box 
                     sx={{ 
-                      width: '140px', 
+                      width: { xs: '80px', sm: '100px', md: '120px', lg: '140px' }, 
                       textAlign: 'right', 
                       cursor: 'pointer', 
                       pr: 2,
@@ -982,7 +1024,7 @@ function App() {
                   </Box>
                   <Box 
                     sx={{ 
-                      width: '140px', 
+                      width: { xs: '80px', sm: '100px', md: '120px', lg: '140px' }, 
                       textAlign: 'right', 
                       cursor: 'pointer', 
                       pr: 2,
@@ -1010,7 +1052,7 @@ function App() {
                   </Box>
                   <Box 
                     sx={{ 
-                      width: '140px', 
+                      width: { xs: '80px', sm: '100px', md: '120px', lg: '140px' }, 
                       textAlign: 'right', 
                       cursor: 'pointer', 
                       pr: 2,
@@ -1038,7 +1080,7 @@ function App() {
                   </Box>
                   <Box 
                     sx={{ 
-                      width: '140px', 
+                      width: { xs: '80px', sm: '100px', md: '120px', lg: '140px' }, 
                       textAlign: 'right', 
                       cursor: 'pointer', 
                       pr: 2,
@@ -1064,7 +1106,7 @@ function App() {
                       {renderSortArrows('volume24h')}
                     </Typography>
                   </Box>
-                  <Box sx={{ width: '120px', textAlign: 'center' }}>
+                  <Box sx={{ width: { xs: '60px', sm: '80px', md: '100px', lg: '120px' }, textAlign: 'center' }}>
                     <Typography variant="body2" color="text.secondary" sx={{ fontFamily: "'Press Start 2P', monospace" }}>ACTION</Typography>
                   </Box>
                 </Box>
@@ -1121,53 +1163,83 @@ function App() {
                         </Box>
                       )}
                       <Box>
-                        <Typography variant="body1" sx={{ color: '#ffffff', fontWeight: 'bold', fontFamily: "'Press Start 2P', monospace" }}>
-                          {token.symbol}
-                        </Typography>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                          <Typography variant="body1" sx={{ color: '#ffffff', fontWeight: 'bold', fontFamily: "'Press Start 2P', monospace" }}>
+                            {token.symbol} <span style={{ color: '#888', fontSize: '0.8em', fontWeight: 'normal' }}>{formatContractAddress(token.mintAddress)}</span>
+                          </Typography>
+                          <Tooltip title="复制合约地址">
+                            <IconButton 
+                              size="small" 
+                              onClick={async () => {
+                                try {
+                                  await navigator.clipboard.writeText(token.mintAddress);
+                                  console.log('✅ CA copied:', token.mintAddress);
+                                  setCopySnackbarOpen(true);
+                                } catch (error) {
+                                  console.error('Failed to copy CA:', error);
+                                }
+                              }}
+                              sx={{ 
+                                p: 0.3,
+                                color: '#888',
+                                '&:hover': { 
+                                  color: '#3ddc84',
+                                  bgcolor: 'rgba(61, 220, 132, 0.1)'
+                                }
+                              }}
+                            >
+                              <ContentCopyIcon sx={{ fontSize: 12 }} />
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
                         <Typography variant="body2" color="text.secondary" sx={{ fontFamily: "'Zpix', 'Press Start 2P', monospace" }}>
                           {token.name}
                         </Typography>
                       </Box>
                     </Box>
-                    <Box sx={{ width: '140px', textAlign: 'right', pr: 2, overflow: 'hidden' }}>
+                    <Box sx={{ width: { xs: '80px', sm: '100px', md: '120px', lg: '140px' }, textAlign: 'right', pr: 2, overflow: 'hidden' }}>
                       <AnimatedNumber 
                         value={token.price} 
                         format={formatPrice} 
                         color="#3ddc84"
                       />
                     </Box>
-                    <Box sx={{ width: '140px', textAlign: 'right', pr: 2, overflow: 'hidden' }}>
+                    <Box sx={{ width: { xs: '80px', sm: '100px', md: '120px', lg: '140px' }, textAlign: 'right', pr: 2, overflow: 'hidden' }}>
                       <AnimatedNumber 
                         value={token.priceChange24h} 
                         format={formatPercentage} 
                         color={token.priceChange24h >= 0 ? '#3ddc84' : '#ff4d4f'}
                       />
                     </Box>
-                    <Box sx={{ width: '140px', textAlign: 'right', pr: 2, overflow: 'hidden' }}>
+                    <Box sx={{ width: { xs: '80px', sm: '100px', md: '120px', lg: '140px' }, textAlign: 'right', pr: 2, overflow: 'hidden' }}>
                       <AnimatedNumber 
                         value={token.marketCap} 
                         format={(val) => `$${formatLargeNumber(val)}`} 
                         color="#ffffff"
                       />
                     </Box>
-                    <Box sx={{ width: '140px', textAlign: 'right', pr: 2, overflow: 'hidden' }}>
+                    <Box sx={{ width: { xs: '80px', sm: '100px', md: '120px', lg: '140px' }, textAlign: 'right', pr: 2, overflow: 'hidden' }}>
                       <AnimatedNumber 
                         value={token.liquidity} 
                         format={(val) => `$${formatLargeNumber(val)}`} 
                         color="#ffffff"
                       />
                     </Box>
-                    <Box sx={{ width: '140px', textAlign: 'right', pr: 2, overflow: 'hidden' }}>
+                    <Box sx={{ width: { xs: '80px', sm: '100px', md: '120px', lg: '140px' }, textAlign: 'right', pr: 2, overflow: 'hidden' }}>
                       <AnimatedNumber 
                         value={token.volume24h} 
                         format={(val) => `$${formatLargeNumber(val)}`} 
                         color="#ffffff"
                       />
                     </Box>
-                    <Box sx={{ width: '120px', textAlign: 'center' }}>
+                    <Box sx={{ width: { xs: '60px', sm: '80px', md: '100px', lg: '120px' }, textAlign: 'center' }}>
                       <Button 
                         size="small" 
                         variant="contained"
+                        onClick={() => {
+                          setSelectedTokenForBuy(token);
+                          setBuyModalOpen(true);
+                        }}
                         sx={{ 
                           bgcolor: '#3ddc84', 
                           color: '#000',
@@ -1279,7 +1351,23 @@ function App() {
                       </IconButton>
                     </Tooltip>
                     
-                    {/* 上移按钮 */}
+                    {/* 删除代币按钮 */}
+                    <Tooltip title="Delete Token">
+                      <IconButton 
+                        size="small" 
+                        onClick={() => {
+                          setSelectedTopicForDelete(topic.id);
+                          setDeleteTokenOpen(true);
+                        }}
+                        disabled={!topic.tokens || topic.tokens.length === 0}
+                        sx={{ 
+                          color: (!topic.tokens || topic.tokens.length === 0) ? '#666' : '#ff4d4f',
+                          '&:hover': { color: '#ff7875' }
+                        }}
+                      >
+                        <RemoveCircleIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
                     <Tooltip title="Move Up">
                       <IconButton 
                         size="small" 
@@ -1386,6 +1474,113 @@ function App() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* 删除代币对话框 */}
+      <Dialog open={deleteTokenOpen} onClose={() => setDeleteTokenOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ color: '#ff4d4f', fontFamily: "'Press Start 2P', 'Zpix', monospace" }}>
+          Delete Token from {topics.find(t => t.id === selectedTopicForDelete)?.name || 'Topic'}
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ mt: 2 }}>
+            <Typography variant="body2" sx={{ mb: 2, color: '#ffffff', fontFamily: "'Press Start 2P', monospace" }}>
+              Select token to delete:
+            </Typography>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: '400px', overflowY: 'auto' }}>
+              {topics.find(t => t.id === selectedTopicForDelete)?.tokens?.map((topicToken) => (
+                <Box 
+                  key={topicToken.id}
+                  sx={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    p: 2, 
+                    bgcolor: '#2a2a2a',
+                    border: '1px solid #333',
+                    borderRadius: '8px',
+                    '&:hover': { bgcolor: '#333' }
+                  }}
+                >
+                  <Box sx={{ flex: 1 }}>
+                    <Typography variant="body1" sx={{ color: '#ffffff', fontFamily: "'Press Start 2P', monospace", fontWeight: 'bold' }}>
+                      {topicToken.token.symbol} <span style={{ color: '#888', fontSize: '0.8em', fontWeight: 'normal' }}>{topicToken.token.mintAddress.slice(0, 4)}...{topicToken.token.mintAddress.slice(-4)}</span>
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ fontFamily: "'Zpix', monospace", mt: 0.5 }}>
+                      {topicToken.token.name}
+                    </Typography>
+                  </Box>
+                  <Button
+                    variant="contained"
+                    size="small"
+                    onClick={async () => {
+                      try {
+                        setLoading(true);
+                        await removeTokenFromTopic(topicToken.id);
+                        await fetchUserData(user.walletAddress);
+                        setDeleteTokenOpen(false);
+                        alert('✅ Token deleted successfully');
+                      } catch (error) {
+                        console.error('Failed to delete token:', error);
+                        alert(`❌ Failed to delete token: ${error.message}`);
+                      } finally {
+                        setLoading(false);
+                      }
+                    }}
+                    disabled={loading}
+                    sx={{ 
+                      bgcolor: '#ff4d4f', 
+                      color: '#ffffff', 
+                      fontFamily: "'Press Start 2P', monospace", 
+                      fontSize: '8px',
+                      '&:hover': { bgcolor: '#ff7875' }
+                    }}
+                  >
+                    DELETE
+                  </Button>
+                </Box>
+              ))}
+            </Box>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button 
+            onClick={() => setDeleteTokenOpen(false)} 
+            sx={{ color: '#999', fontFamily: "'Press Start 2P', monospace", fontSize: '10px' }}
+          >
+            CLOSE
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 买入弹窗 */}
+      <BuyModal
+        open={buyModalOpen}
+        onClose={() => setBuyModalOpen(false)}
+        token={selectedTokenForBuy}
+      />
+
+      {/* 复制成功提示 */}
+      <Snackbar 
+        open={copySnackbarOpen} 
+        autoHideDuration={2000} 
+        onClose={() => setCopySnackbarOpen(false)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert 
+          onClose={() => setCopySnackbarOpen(false)} 
+          severity="success"
+          sx={{ 
+            fontFamily: "'Press Start 2P', monospace",
+            fontSize: '10px',
+            bgcolor: '#0d1e12',
+            color: '#3ddc84',
+            border: '1px solid #3ddc84',
+            '& .MuiAlert-icon': {
+              color: '#3ddc84'
+            }
+          }}
+        >
+          ✅ 合约地址已复制
+        </Alert>
+      </Snackbar>
     </ThemeProvider>
   )
 }
